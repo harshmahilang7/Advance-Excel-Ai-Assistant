@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+
+  <Id>1f337402-3256-4fa7-a3c9-ad8c5076ed16</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Excel-Ai-Assistant (open source)</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Excel-Ai-Assistant"/>
+  <Description DefaultValue="AI assistant for Excel. Type plain-English commands; it edits your sheet. Bring your own Gemini API key."/>
+  <IconUrl DefaultValue="https://excel-ai-assistant-ivory.vercel.app/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://excel-ai-assistant-ivory.vercel.app/assets/icon-64.png"/>
+  <SupportUrl DefaultValue="https://excel-ai-assistant-ivory.vercel.app"/>
+
+  <AppDomains>
+    <AppDomain>https://generativelanguage.googleapis.com</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Workbook"/>
+  </Hosts>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://excel-ai-assistant-ivory.vercel.app/index.html"/>
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Workbook">
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title"/>
+            <Description resid="GetStarted.Description"/>
+            <LearnMoreUrl resid="Url.Learn"/>
+          </GetStarted>
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="AssistantGroup">
+                <Label resid="Group.Label"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16"/>
+                  <bt:Image size="32" resid="Icon.32"/>
+                  <bt:Image size="80" resid="Icon.80"/>
+                </Icon>
+                <Control xsi:type="Button" id="ShowTaskpane">
+                  <Label resid="Button.Label"/>
+                  <Supertip>
+                    <Title resid="Button.Label"/>
+                    <Description resid="Button.Tooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonId1</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16" DefaultValue="https://excel-ai-assistant-ivory.vercel.app/assets/icon-16.png"/>
+        <bt:Image id="Icon.32" DefaultValue="https://excel-ai-assistant-ivory.vercel.app/assets/icon-32.png"/>
+        <bt:Image id="Icon.80" DefaultValue="https://excel-ai-assistant-ivory.vercel.app/assets/icon-80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://excel-ai-assistant-ivory.vercel.app/index.html"/>
+        <bt:Url id="Url.Learn" DefaultValue="https://excel-ai-assistant-ivory.vercel.app"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="Group.Label" DefaultValue="Excel-Ai-Assistant"/>
+        <bt:String id="Button.Label" DefaultValue="AI Assistant"/>
+        <bt:String id="GetStarted.Title" DefaultValue="Excel-Ai-Assistant is ready"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="Button.Tooltip" DefaultValue="Open the AI assistant pane"/>
+        <bt:String id="GetStarted.Description" DefaultValue="Open the Home tab and click AI Assistant."/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

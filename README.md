@@ -94,6 +94,44 @@ npm run sideload   # opens Excel with the add-in loaded
 
 In Excel, go to **Home → AI Assistant**, enter your Gemini key, and start typing commands.
 
+### Keep the add-in installed in Excel (Trusted Add-in Catalog)
+
+`npm run sideload` is a developer shortcut: it loads the add-in for one session and is not a real install. To make **Excel-Ai-Assistant** a permanent entry under *Insert → My Add-ins*, register a folder holding `manifest.xml` as a **Trusted Add-in Catalog**. This is a one-time setup (Windows).
+
+1. **Stop any dev sideload** so the two do not clash: `npm run stop`.
+2. **Create a folder** such as `C:\ExcelAddins` and copy `manifest.xml` into it.
+3. **Share the folder** (Excel needs a network-style path):
+   - Right-click the folder → **Properties** → **Sharing** tab → **Share...**
+   - Choose your own user, click **Add**, then **Share**, then **Done**.
+   - Note the **Network Path** shown, for example `\\MY-PC\ExcelAddins`.
+4. **Trust the catalog in Excel:**
+   - Open Excel → **File → Options → Trust Center → Trust Center Settings... → Trusted Add-in Catalogs**.
+   - Paste the network path into **Catalog Url** and click **Add catalog**.
+   - Tick **Show in Menu** for that row, click **OK** twice.
+   - **Close and reopen Excel** (the setting only applies after a restart).
+5. **Add the add-in:** **Insert → My Add-ins → SHARED FOLDER** tab → select **Excel-Ai-Assistant** → **Add**. The **AI Assistant** button now appears on the Home tab.
+
+There are two manifests:
+
+| File | Pane loads from | Use for |
+|---|---|---|
+| `manifest.xml` | `https://localhost:3100` | Development (`npm run dev` must be running) |
+| `manifest.prod.xml` | `https://excel-ai-assistant-ivory.vercel.app` | Everyday use, no dev server needed |
+
+For everyday use, copy `manifest.prod.xml` into the shared folder and rename it `manifest.xml`. If you update a manifest later, copy it again and restart Excel; Excel caches manifests.
+
+### Hosting your own copy (Vercel)
+
+The app is a static site, so any HTTPS host works. With Vercel:
+
+```bash
+npm install
+npx vercel link --yes --project <your-project-name>
+npx vercel deploy --prod --yes     # uses vercel.json: build with npm run build, serve dist/
+```
+
+Then copy `manifest.prod.xml`, replace every `https://excel-ai-assistant-ivory.vercel.app` with your deployment URL, validate it with `npx office-addin-manifest validate manifest.prod.xml`, and install it through the Trusted Add-in Catalog as described above. The hosted pane contains no secrets: each user's Gemini key stays in their own browser storage.
+
 ### Scripts
 
 | Command | What it does |
