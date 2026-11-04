@@ -78,7 +78,7 @@ TypeScript, React, Fluent UI, Vite, Office.js (Excel API), [`@google/genai`](htt
 ### Install and run
 
 ```bash
-git clone https://github.com/<your-user>/Excel-Ai-Assistant.git
+git clone https://github.com/ifahimkhan/Excel-Ai-Assistant.git
 cd Excel-Ai-Assistant
 npm install
 
