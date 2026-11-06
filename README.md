@@ -22,7 +22,7 @@ The model reads your selection, calls tools, and the add-in applies them to the 
 
 | Area | Tools |
 |---|---|
-| Read | `get_workbook_info`, `read_range` |
+| Read | `get_workbook_info`, `read_range`, `audit_formulas` (error values, formulas that break their column's pattern, typed numbers inside formula columns; hints, not proof) |
 | Write | `write_cells` (values and formulas), `clear_range` |
 | Format | `format_range` (bold, italic, colours, number format, alignment, wrap), `conditional_format` (cell value, text, colour scale), `autofit_columns` |
 | Data | `sort_range`, `create_table`, `find_replace`, `remove_duplicates`, `filter_range`, `data_validation` (dropdowns, number and text-length limits) |

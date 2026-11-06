@@ -104,6 +104,7 @@ const schemas = {
     title: z.string().max(200).optional(),
   }),
   autofit_columns: z.object({ address }),
+  audit_formulas: z.object({ address: address.optional() }),
   add_sheet: z.object({ name: sheetName }),
   rename_sheet: z.object({ currentName: sheetName, newName: sheetName }),
   freeze_panes: z.object({
@@ -232,6 +233,8 @@ const descriptions: Record<ToolName, string> = {
   create_table: "Convert a range into an Excel table with filters and banded rows.",
   create_chart: "Create a chart from a source range (include header row/column for labels) on the same sheet.",
   autofit_columns: "Auto-fit column widths for the columns covering the range.",
+  audit_formulas:
+    "Read-only check for spreadsheet problems in a range (default: the whole active sheet's used range, max 50,000 cells): cells showing errors (#REF!, #DIV/0!, #N/A...), formulas that break their column's pattern, and typed numbers inside a column of formulas. Returns A1 addresses with a short reason each. Findings are hints, not proof: totals rows often differ on purpose. Use read_range on flagged cells to explain or fix them.",
   add_sheet: "Add a new worksheet with the given name (max 31 chars, none of \\ / ? * [ ] :). Fails if the name is taken.",
   rename_sheet: "Rename an existing worksheet.",
   freeze_panes:

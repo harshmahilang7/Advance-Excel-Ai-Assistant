@@ -31,7 +31,7 @@ const DEFAULT_SAMPLE_ROWS = 5;
 const isBlank = (v: CellValue): boolean => v === null || v === "";
 
 /** 0 -> "A", 25 -> "Z", 26 -> "AA" */
-const columnLetter = (index: number): string => {
+export const columnLetter = (index: number): string => {
   let n = index;
   let out = "";
   do {

@@ -15,6 +15,15 @@ describe("createPreviewExecutor", () => {
     expect(queued).toEqual([]);
   });
 
+  it("treats audit_formulas as read-only", async () => {
+    const real = vi.fn<ToolExecutor>(async () => okResult("audited"));
+    const queued: PendingCall[] = [];
+    const exec = createPreviewExecutor(real, (c) => queued.push(c));
+    await exec("audit_formulas", {});
+    expect(real).toHaveBeenCalledOnce();
+    expect(queued).toEqual([]);
+  });
+
   it("queues write tools without running them", async () => {
     const real = vi.fn<ToolExecutor>(async () => okResult("done"));
     const queued: PendingCall[] = [];

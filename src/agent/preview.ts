@@ -3,7 +3,7 @@ import type { ToolExecutor, ToolResult } from "./loop";
 import { parseToolCall } from "./tools";
 
 /** Tools that only read the workbook. In preview mode they still run, so the model can look around. */
-const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(["get_workbook_info", "read_range"]);
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(["get_workbook_info", "read_range", "audit_formulas"]);
 
 export interface PendingCall {
   readonly name: string;

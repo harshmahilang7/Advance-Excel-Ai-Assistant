@@ -2,6 +2,7 @@ import { parseToolCall, type ToolArgs, type ToolName } from "../agent/tools";
 import type { ToolExecutor, ToolResult } from "../agent/loop";
 import { splitSheetAddress } from "./address";
 import { toRuleFormula } from "./conditionalFormat";
+import { auditFormulas, MAX_FINDINGS_PER_KIND } from "./formulaAudit";
 import { canSnapshotFormats, FORMAT_PROPS_REQUEST, toRestoreProps, type CellFormat } from "./formatSnapshot";
 import { resolvePivotFields, type PivotAggregation } from "./pivotFields";
 import { preparePivotSource } from "./pivotSource";
@@ -10,6 +11,8 @@ import { keepVisibleRows } from "./visibility";
 import { loadRowHidden, MAX_SCAN_ROWS } from "./visibleRange";
 
 const DEFAULT_READ_ROWS = 100;
+const MAX_AUDIT_CELLS = 50000;
+const KINDS_ORDER = ["error_value", "inconsistent_formula", "hardcoded_in_formulas"] as const;
 
 // String literals (not Excel.AggregationFunction.*) so nothing touches the Excel global at import time.
 const AGGREGATIONS: Record<PivotAggregation, "Sum" | "Count" | "Average" | "Max" | "Min"> = {
@@ -252,6 +255,28 @@ const handlers: Handlers = {
     const describe = fields.values.map((v) => `${v.summarizeBy} of ${v.field}`).join(", ");
     const by = fields.rows.length ? ` by ${fields.rows.join(", ")}` : "";
     return ok(`Created PivotTable "${name}" on ${sheetName}: ${describe}${by}. ${prepared.note}`.trim());
+  },
+
+  async audit_formulas(ctx, { address }) {
+    const scope = address ? resolveRange(ctx, address) : ctx.workbook.worksheets.getActiveWorksheet().getUsedRangeOrNullObject(true);
+    const used = address ? scope.getUsedRangeOrNullObject(true) : (scope as Excel.Range);
+    used.load(["address", "rowCount", "columnCount", "rowIndex", "columnIndex"]);
+    await ctx.sync();
+    if (used.isNullObject) return ok("Nothing to audit: the range is empty.", { findings: [] });
+    if (used.rowCount * used.columnCount > MAX_AUDIT_CELLS) {
+      return { ok: false, error: `Range is too large to audit (over ${MAX_AUDIT_CELLS} cells). Give a smaller address.` };
+    }
+    used.load(["formulasR1C1", "values"]);
+    await ctx.sync();
+    const result = auditFormulas({
+      startRow: used.rowIndex,
+      startCol: used.columnIndex,
+      formulasR1C1: used.formulasR1C1,
+      values: used.values,
+    });
+    const counts = KINDS_ORDER.map((k) => `${result.totals[k]} ${k.replaceAll("_", " ")}`).join(", ");
+    const cap = result.truncated ? ` (showing first ${MAX_FINDINGS_PER_KIND} of each kind)` : "";
+    return ok(`Audited ${used.address}: ${result.formulaCount} formulas, ${counts}${cap}`, { range: used.address, ...result });
   },
 
   async add_sheet(ctx, { name }, undo) {
