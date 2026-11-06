@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Spinner, Switch, Text, Textarea } from "@fluentui/react-components";
-import { applyPending, createPreviewExecutor, type PendingCall } from "../agent/preview";
+import { addEntry, dropLastMatching, formatChangeLog, type ChangeEntry } from "../agent/changeLog";
+import { applyPending, createPreviewExecutor, isReadOnlyTool, type PendingCall } from "../agent/preview";
+import { browserChangeLogStore } from "../lib/changeLogStore";
 import { createGeminiClient } from "../agent/geminiClient";
 import { trimHistory } from "../agent/history";
 import { runAgent, type AgentEvent, type ChatMessage, type StreamEvent } from "../agent/loop";
@@ -52,6 +54,8 @@ export const Chat = ({ apiKey, modelId }: Props) => {
   const chatStore = useMemo(() => browserChatStore(), []);
   const workbookKey = useMemo(workbookKeyOf, []);
   const [lines, setLines] = useState<readonly Line[]>(() => chatStore.load(workbookKey));
+  const changeStore = useMemo(() => browserChangeLogStore(), []);
+  const changeLogRef = useRef<readonly ChangeEntry[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const lastCommandRef = useRef([...lines].reverse().find((l) => l.kind === "user")?.text ?? "");
   const [input, setInput] = useState("");
@@ -84,6 +88,19 @@ export const Chat = ({ apiKey, modelId }: Props) => {
   useEffect(() => {
     chatStore.save(workbookKey, lines);
   }, [chatStore, workbookKey, lines]);
+
+  // Load what was changed earlier in this workbook (survives reloads and history trimming).
+  useEffect(() => {
+    changeLogRef.current = changeStore.load(workbookKey);
+  }, [changeStore, workbookKey]);
+
+  const setChangeLog = useCallback(
+    (next: readonly ChangeEntry[]) => {
+      changeLogRef.current = next;
+      changeStore.save(workbookKey, next);
+    },
+    [changeStore, workbookKey],
+  );
 
   // Refresh selection-aware chips whenever the chat is empty (mount, after Clear chat).
   const isEmpty = lines.length === 0;
@@ -141,13 +158,20 @@ export const Chat = ({ apiKey, modelId }: Props) => {
       const controller = new AbortController();
       abortRef.current = controller;
       let queued: readonly PendingCall[] = [];
+      let steps: readonly string[] = [];
+      const collect = (e: AgentEvent) => {
+        onEvent(e);
+        // Only real, successful writes count. In preview mode nothing ran, so nothing is recorded here.
+        if (!previewMode && e.type === "tool" && e.ok && !isReadOnlyTool(e.name)) steps = [...steps, e.summary];
+      };
       const runner = previewMode
         ? createPreviewExecutor(execute, (c) => {
             queued = [...queued, c];
           })
         : execute;
       try {
-        const context = discardNoteRef.current + (await buildLiveContext());
+        const memory = formatChangeLog(changeLogRef.current);
+        const context = discardNoteRef.current + (memory ? `${memory}\n` : "") + (await buildLiveContext());
         discardNoteRef.current = "";
         const result = await runAgent({
           model,
@@ -156,7 +180,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
           context,
           history: historyRef.current,
           signal: controller.signal,
-          onEvent,
+          onEvent: collect,
           onStream,
         });
         historyRef.current = trimHistory(result.history, KEEP_USER_TURNS);
@@ -170,13 +194,14 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         setRunning(false);
         setCanUndo(undo.canUndo());
         setContextTokens(FIXED_TOKENS + estimateHistoryTokens(historyRef.current));
+        setChangeLog(addEntry(changeLogRef.current, { command: text, steps }));
         if (queued.length > 0) {
           setPending(queued);
           pendingLabelRef.current = text.slice(0, 60);
         }
       }
     },
-    [running, previewMode, push, undo, model, execute, onEvent, onStream],
+    [running, previewMode, push, undo, model, execute, onEvent, onStream, setChangeLog],
   );
 
   const applyChanges = useCallback(async () => {
@@ -188,12 +213,14 @@ export const Chat = ({ apiKey, modelId }: Props) => {
       const outcome = await applyPending(execute, pending);
       for (const step of outcome.results) push({ kind: "action", ok: step.ok, text: `${step.ok ? "✓" : "⚠"} ${step.text}` });
       if (outcome.skipped > 0) push({ kind: "note", text: `Stopped after a failure; ${outcome.skipped} queued change(s) were not applied.` });
+      const done = outcome.results.filter((r) => r.ok).map((r) => r.text);
+      setChangeLog(addEntry(changeLogRef.current, { command: pendingLabelRef.current, steps: done }));
     } finally {
       setPending([]);
       setRunning(false);
       setCanUndo(undo.canUndo());
     }
-  }, [pending, running, undo, execute, push]);
+  }, [pending, running, undo, execute, push, setChangeLog]);
 
   const discardChanges = useCallback(() => {
     push({ kind: "note", text: `Discarded ${pending.length} queued change(s). Nothing was changed.` });
@@ -205,9 +232,10 @@ export const Chat = ({ apiKey, modelId }: Props) => {
     const outcome = await undo.undoLast();
     setCanUndo(undo.canUndo());
     if (!outcome) return;
+    setChangeLog(dropLastMatching(changeLogRef.current, outcome.label));
     const failed = outcome.failed.length > 0 ? ` (${outcome.failed.length} could not be restored)` : "";
     push({ kind: "note", text: `Undid "${outcome.label}": ${outcome.restored} step(s)${failed}.` });
-  }, [undo, push]);
+  }, [undo, push, setChangeLog]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 0, flex: 1 }}>
@@ -298,7 +326,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         <Button size="small" onClick={() => void send(lastCommandRef.current)} disabled={running || pending.length > 0 || !lastCommandRef.current}>
           Retry last
         </Button>
-        <Button size="small" appearance="subtle" onClick={() => { setLines([]); setPending([]); historyRef.current = []; setContextTokens(FIXED_TOKENS); }} disabled={running}>
+        <Button size="small" appearance="subtle" onClick={() => { setLines([]); setPending([]); historyRef.current = []; setContextTokens(FIXED_TOKENS); changeLogRef.current = []; changeStore.clear(workbookKey); }} disabled={running}>
           Clear chat
         </Button>
       </div>
