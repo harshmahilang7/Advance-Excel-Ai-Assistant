@@ -1,3 +1,4 @@
+import { friendlyError } from "../lib/friendlyError";
 import { parseToolCall } from "./tools";
 
 export interface RawToolCall {
@@ -58,7 +59,7 @@ export interface AgentResult {
 
 const DEFAULT_MAX_STEPS = 12;
 
-const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+const errorMessage = friendlyError;
 
 const runOne = async (execute: ToolExecutor, call: RawToolCall): Promise<ToolResult> => {
   const parsed = parseToolCall(call.name, call.args);

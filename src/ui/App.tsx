@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Dropdown, Option, Text } from "@fluentui/react-components";
 import { browserKeyStore } from "../lib/keyStore";
-import { listChatModels, type ModelInfo } from "../agent/gemini";
+import { isInvalidKeyError, listChatModels, type ModelInfo } from "../agent/gemini";
+import { pickDefaultModel } from "../agent/models";
 import { ApiKeyGate } from "./ApiKeyGate";
 import { Chat } from "./Chat";
 import { SelectionPanel } from "./SelectionPanel";
@@ -10,10 +11,6 @@ interface Session {
   readonly apiKey: string;
   readonly models: readonly ModelInfo[];
 }
-
-/** Prefer a fast "flash" model by default; the user can switch in the dropdown. */
-const pickDefaultModel = (models: readonly ModelInfo[]): string =>
-  models.find((m) => /flash/.test(m.id) && !/(lite|image|live|tts|preview|exp)/.test(m.id))?.id ?? models[0]?.id ?? "";
 
 export const App = () => {
   const store = useMemo(() => browserKeyStore(), []);
@@ -33,7 +30,8 @@ export const App = () => {
     let cancelled = false;
     listChatModels(saved)
       .then((models) => !cancelled && start(saved, models))
-      .catch(() => store.clear())
+      // Forget the saved key only when Google says it is bad, not on a network blip or rate limit.
+      .catch((err: unknown) => isInvalidKeyError(err) && store.clear())
       .finally(() => !cancelled && setRestoring(false));
     return () => {
       cancelled = true;

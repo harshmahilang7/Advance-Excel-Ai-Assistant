@@ -1,8 +1,13 @@
 import { parseToolCall, type ToolArgs, type ToolName } from "../agent/tools";
 import type { ToolExecutor, ToolResult } from "../agent/loop";
 import { splitSheetAddress } from "./address";
+import { toRuleFormula } from "./conditionalFormat";
+import { canSnapshotFormats, FORMAT_PROPS_REQUEST, toRestoreProps, type CellFormat } from "./formatSnapshot";
 import { resolvePivotFields, type PivotAggregation } from "./pivotFields";
+import { preparePivotSource } from "./pivotSource";
 import type { UndoLog } from "./undo";
+import { keepVisibleRows } from "./visibility";
+import { loadRowHidden, MAX_SCAN_ROWS } from "./visibleRange";
 
 const DEFAULT_READ_ROWS = 100;
 
@@ -40,7 +45,35 @@ const snapshotFormulas = async (ctx: Ctx, range: Excel.Range, undo: UndoLog): Pr
   return fullAddress;
 };
 
-type Handlers = { [N in ToolName]: (ctx: Ctx, args: ToolArgs<N>, undo: UndoLog) => Promise<ToolResult> };
+/**
+ * Remember cell formatting (font, fill, alignment, wrap, number format) so the command can be undone.
+ * Returns false when it cannot (old Excel, or a range too large to snapshot cell by cell).
+ */
+const snapshotFormats = async (ctx: Ctx, range: Excel.Range, undo: UndoLog): Promise<boolean> => {
+  if (!Office.context.requirements.isSetSupported("ExcelApi", "1.9")) return false;
+  range.load(["address", "rowCount", "columnCount", "numberFormat"]);
+  await ctx.sync();
+  if (!canSnapshotFormats(range.rowCount, range.columnCount)) return false;
+  const props = range.getCellProperties(FORMAT_PROPS_REQUEST as unknown as Excel.CellPropertiesLoadOptions);
+  await ctx.sync();
+  const fullAddress = range.address;
+  const saved = toRestoreProps(props.value as unknown as CellFormat[][]) as unknown as Excel.CellProperties[][];
+  const numberFormat = range.numberFormat.map((row) => [...row]);
+  undo.record(`restore formatting ${fullAddress}`, () =>
+    Excel.run(async (c) => {
+      const r = resolveRange(c, fullAddress);
+      r.format.fill.clear();
+      r.setCellProperties(saved);
+      r.numberFormat = numberFormat;
+      await c.sync();
+    }),
+  );
+  return true;
+};
+
+const NOT_UNDOABLE = " (formatting too large to undo)";
+
+type Handlers ={ [N in ToolName]: (ctx: Ctx, args: ToolArgs<N>, undo: UndoLog) => Promise<ToolResult> };
 
 const handlers: Handlers = {
   async get_workbook_info(ctx) {
@@ -58,19 +91,27 @@ const handlers: Handlers = {
   },
 
   async read_range(ctx, { address, maxRows }) {
-    const full = resolveRange(ctx, address);
+    const full = resolveRange(ctx, address).getUsedRangeOrNullObject(true);
     full.load(["rowCount", "columnCount"]);
     await ctx.sync();
-    const limit = Math.min(maxRows ?? DEFAULT_READ_ROWS, full.rowCount);
-    const range = full.getRow(0).getResizedRange(limit - 1, 0);
+    if (full.isNullObject) return ok(`${address} is empty`, { address, totalRows: 0, columns: 0, values: [], formulas: [] });
+
+    const scanRows = Math.min(full.rowCount, MAX_SCAN_ROWS);
+    const range = full.getRow(0).getResizedRange(scanRows - 1, 0);
     range.load(["address", "values", "formulas"]);
     await ctx.sync();
-    const formulas = range.formulas.map((row) => row.map((f) => (typeof f === "string" && f.startsWith("=") ? f : null)));
-    return ok(`Read ${range.address} (${limit} of ${full.rowCount} rows)`, {
+    const hidden = await loadRowHidden(ctx, range, scanRows);
+    const visible = keepVisibleRows(range.values.map((values, i) => ({ values, formulas: range.formulas[i] ?? [] })), hidden);
+    const limit = Math.min(maxRows ?? DEFAULT_READ_ROWS, visible.rows.length);
+    const shown = visible.rows.slice(0, limit);
+    const formulas = shown.map((r) => r.formulas.map((f) => (typeof f === "string" && f.startsWith("=") ? f : null)));
+    const skipped = visible.hiddenCount > 0 ? `, ${visible.hiddenCount} filtered-out rows skipped` : "";
+    return ok(`Read ${range.address} (${limit} of ${visible.rows.length} visible rows${skipped})`, {
       address: range.address,
       totalRows: full.rowCount,
+      hiddenRowsSkipped: visible.hiddenCount,
       columns: full.columnCount,
-      values: range.values,
+      values: shown.map((r) => r.values),
       formulas,
     });
   },
@@ -85,8 +126,9 @@ const handlers: Handlers = {
     return ok(`Wrote ${rows}x${cols} cells at ${where}`);
   },
 
-  async format_range(ctx, a) {
+  async format_range(ctx, a, undo) {
     const range = resolveRange(ctx, a.address);
+    const undoable = await snapshotFormats(ctx, range, undo);
     range.load(["rowCount", "columnCount", "address"]);
     await ctx.sync();
     if (a.bold !== undefined) range.format.font.bold = a.bold;
@@ -99,7 +141,7 @@ const handlers: Handlers = {
       range.numberFormat = Array.from({ length: range.rowCount }, () => Array(range.columnCount).fill(a.numberFormat));
     }
     await ctx.sync();
-    return ok(`Formatted ${range.address}`);
+    return ok(`Formatted ${range.address}${undoable ? "" : NOT_UNDOABLE}`);
   },
 
   async sort_range(ctx, { address, columnIndex, ascending, hasHeaders }, undo) {
@@ -113,10 +155,11 @@ const handlers: Handlers = {
   async clear_range(ctx, { address, what }, undo) {
     const range = resolveRange(ctx, address);
     const where = await snapshotFormulas(ctx, range, undo);
+    const undoable = what === "contents" || (await snapshotFormats(ctx, range, undo));
     const applyTo = { contents: Excel.ClearApplyTo.contents, formats: Excel.ClearApplyTo.formats, all: Excel.ClearApplyTo.all }[what];
     range.clear(applyTo);
     await ctx.sync();
-    return ok(`Cleared ${what} of ${where}`);
+    return ok(`Cleared ${what} of ${where}${undoable ? "" : NOT_UNDOABLE}`);
   },
 
   async create_table(ctx, { address, hasHeaders, name }, undo) {
@@ -160,11 +203,11 @@ const handlers: Handlers = {
     if (!Office.context.requirements.isSetSupported("ExcelApi", "1.8")) {
       return { ok: false, error: "PivotTables need Excel API 1.8 or newer. Update Excel." };
     }
-    const source = resolveRange(ctx, args.sourceAddress);
-    source.load(["address", "values"]);
-    await ctx.sync();
-    const headers = (source.values[0] ?? []).map((h) => String(h ?? ""));
-    const fields = resolvePivotFields(headers, args);
+    const suffix = Date.now().toString(36).slice(-4);
+    const prepared = await preparePivotSource(ctx, resolveRange(ctx, args.sourceAddress), args.visibleRowsOnly, suffix, undo);
+    if (!prepared.ok) return { ok: false, error: prepared.error };
+    const source = prepared.range;
+    const fields = resolvePivotFields(prepared.headers, args);
     if (!fields.ok) return { ok: false, error: fields.error };
 
     const name = args.name ?? `Pivot_${Date.now().toString(36).slice(-5)}`;
@@ -173,7 +216,7 @@ const handlers: Handlers = {
     if (args.destinationAddress) {
       destination = resolveRange(ctx, args.destinationAddress).getCell(0, 0);
     } else {
-      newSheetName = `Pivot ${Date.now().toString(36).slice(-4)}`;
+      newSheetName = `Pivot ${suffix}`;
       const sheet = ctx.workbook.worksheets.add(newSheetName);
       destination = sheet.getRange("A3");
       undo.record(`delete sheet ${newSheetName}`, () =>
@@ -207,7 +250,71 @@ const handlers: Handlers = {
     await ctx.sync();
 
     const describe = fields.values.map((v) => `${v.summarizeBy} of ${v.field}`).join(", ");
-    return ok(`Created PivotTable "${name}" on ${sheetName}: ${describe}${fields.rows.length ? ` by ${fields.rows.join(", ")}` : ""}`);
+    const by = fields.rows.length ? ` by ${fields.rows.join(", ")}` : "";
+    return ok(`Created PivotTable "${name}" on ${sheetName}: ${describe}${by}. ${prepared.note}`.trim());
+  },
+
+  async find_replace(ctx, a, undo) {
+    if (!Office.context.requirements.isSetSupported("ExcelApi", "1.9")) {
+      return { ok: false, error: "Find & replace needs Excel API 1.9 or newer. Update Excel." };
+    }
+    const scope = a.address
+      ? resolveRange(ctx, a.address)
+      : ctx.workbook.worksheets.getActiveWorksheet().getUsedRangeOrNullObject(true);
+    if (!a.address) {
+      (scope as Excel.Range).load("isNullObject");
+      await ctx.sync();
+      if ((scope as Excel.Range).isNullObject) return ok("The sheet is empty; nothing to replace.");
+    }
+    const where = await snapshotFormulas(ctx, scope, undo);
+    const result = scope.replaceAll(a.find, a.replace, { completeMatch: a.matchEntireCell, matchCase: a.matchCase });
+    await ctx.sync();
+    return ok(`Replaced "${a.find}" with "${a.replace}" in ${result.value} cell(s) of ${where}`);
+  },
+
+  async conditional_format(ctx, a, undo) {
+    const range = resolveRange(ctx, a.address);
+    let cf: Excel.ConditionalFormat;
+    let described: string;
+
+    if (a.rule === "cellValue") {
+      cf = range.conditionalFormats.add("CellValue");
+      if (a.fillColor) cf.cellValue.format.fill.color = a.fillColor;
+      if (a.fontColor) cf.cellValue.format.font.color = a.fontColor;
+      cf.cellValue.rule = {
+        formula1: toRuleFormula(a.value1 as string | number),
+        ...(a.value2 !== undefined ? { formula2: toRuleFormula(a.value2) } : {}),
+        operator: a.operator as Excel.ConditionalCellValueOperator,
+      };
+      described = `cells ${a.operator} ${a.value1}${a.value2 !== undefined ? ` and ${a.value2}` : ""}`;
+    } else if (a.rule === "text") {
+      cf = range.conditionalFormats.add("ContainsText");
+      if (a.fillColor) cf.textComparison.format.fill.color = a.fillColor;
+      if (a.fontColor) cf.textComparison.format.font.color = a.fontColor;
+      cf.textComparison.rule = { operator: "Contains", text: a.text as string };
+      described = `cells containing "${a.text}"`;
+    } else {
+      cf = range.conditionalFormats.add("ColorScale");
+      cf.colorScale.criteria = {
+        minimum: { type: "LowestValue", color: a.minColor as string },
+        ...(a.midColor ? { midpoint: { type: "Percentile", formula: "50", color: a.midColor } } : {}),
+        maximum: { type: "HighestValue", color: a.maxColor as string },
+      } as Excel.ConditionalColorScaleCriteria;
+      described = "colour scale";
+    }
+
+    cf.load("id");
+    range.load("address");
+    await ctx.sync();
+    const id = cf.id;
+    const fullAddress = range.address;
+    undo.record(`remove conditional format on ${fullAddress}`, () =>
+      Excel.run(async (c) => {
+        resolveRange(c, fullAddress).conditionalFormats.getItem(id).delete();
+        await c.sync();
+      }),
+    );
+    return ok(`Added conditional format on ${fullAddress}: ${described}`);
   },
 
   async autofit_columns(ctx, { address }) {

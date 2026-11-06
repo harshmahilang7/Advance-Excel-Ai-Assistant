@@ -5,9 +5,13 @@ export interface RangeSnapshot {
   readonly sheetName: string;
   readonly address: string;
   readonly values: readonly (readonly CellValue[])[];
+  /** Rows of the selection hidden by a filter or by hand; they are excluded from `values`. */
+  readonly hiddenRowCount?: number;
 }
 
 export interface SheetSummary {
+  /** Rows hidden by a filter in the scanned selection. Only visible rows are summarized. */
+  readonly hiddenRowCount: number;
   readonly sheetName: string;
   readonly address: string;
   readonly columnCount: number;
@@ -63,6 +67,7 @@ export const summarizeRange = (
 
   if (!headerRow) {
     return {
+      hiddenRowCount: snapshot.hiddenRowCount ?? 0,
       sheetName: snapshot.sheetName,
       address: snapshot.address,
       columnCount: 0,
@@ -80,6 +85,7 @@ export const summarizeRange = (
   const columnTypes = headers.map((_, i) => inferColumnType(dataRows.map((r) => r[i] ?? null)));
 
   return {
+    hiddenRowCount: snapshot.hiddenRowCount ?? 0,
     sheetName: snapshot.sheetName,
     address: snapshot.address,
     columnCount: headers.length,

@@ -33,6 +33,17 @@ const chartTypes = [
   "Doughnut",
 ] as const;
 
+const CELL_OPERATORS = [
+  "GreaterThan",
+  "LessThan",
+  "GreaterThanOrEqual",
+  "LessThanOrEqual",
+  "EqualTo",
+  "NotEqualTo",
+  "Between",
+  "NotBetween",
+] as const;
+
 const schemas = {
   get_workbook_info: z.object({}),
   read_range: z.object({
@@ -74,9 +85,45 @@ const schemas = {
     title: z.string().max(200).optional(),
   }),
   autofit_columns: z.object({ address }),
+  find_replace: z.object({
+    address: address.optional(),
+    find: z.string().min(1).max(255),
+    replace: z.string().max(32000),
+    matchCase: z.boolean().default(false),
+    matchEntireCell: z.boolean().default(false),
+  }),
+  conditional_format: z
+    .object({
+      address,
+      rule: z.enum(["cellValue", "text", "colorScale"]),
+      operator: z.enum(CELL_OPERATORS).optional(),
+      value1: z.union([z.string().max(255), z.number()]).optional(),
+      value2: z.union([z.string().max(255), z.number()]).optional(),
+      text: z.string().min(1).max(255).optional(),
+      fillColor: hexColor.optional(),
+      fontColor: hexColor.optional(),
+      minColor: hexColor.optional(),
+      midColor: hexColor.optional(),
+      maxColor: hexColor.optional(),
+    })
+    .superRefine((a, ctx) => {
+      const fail = (message: string) => ctx.addIssue({ code: "custom", message });
+      const hasStyle = a.fillColor !== undefined || a.fontColor !== undefined;
+      if (a.rule === "cellValue") {
+        if (!a.operator || a.value1 === undefined) fail("cellValue rule needs operator and value1.");
+        else if ((a.operator === "Between" || a.operator === "NotBetween") && a.value2 === undefined) fail(`${a.operator} needs value2.`);
+        if (!hasStyle) fail("Give fillColor and/or fontColor.");
+      } else if (a.rule === "text") {
+        if (!a.text) fail("text rule needs text.");
+        if (!hasStyle) fail("Give fillColor and/or fontColor.");
+      } else if (!a.minColor || !a.maxColor) {
+        fail("colorScale needs minColor and maxColor (midColor optional).");
+      }
+    }),
   create_pivot_table: z.object({
     sourceAddress: address,
     destinationAddress: address.optional(),
+    visibleRowsOnly: z.boolean().default(true),
     name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_ ]{0,60}$/, "Pivot name: letters, digits, underscore, space.").optional(),
     rows: z.array(z.string().min(1).max(255)).max(10),
     columns: z.array(z.string().min(1).max(255)).max(10).default([]),
@@ -117,7 +164,7 @@ export const parseToolCall = (name: string, args: unknown): ParseResult => {
 const descriptions: Record<ToolName, string> = {
   get_workbook_info: "List all worksheets with their used range addresses. Call this first if you do not know the layout.",
   read_range:
-    "Read cell values and formulas from a range. Use to inspect data before changing it. Returns up to maxRows rows (default 100).",
+    "Read cell values and formulas from a range. Use to inspect data before changing it. Returns up to maxRows rows (default 100). Rows hidden by a filter are skipped; the result reports how many.",
   write_cells:
     "Write a 2D array of values starting at the top-left cell of address. A string starting with '=' is a formula. Prefer formulas over hard-coded results so values stay live.",
   format_range:
@@ -127,8 +174,12 @@ const descriptions: Record<ToolName, string> = {
   create_table: "Convert a range into an Excel table with filters and banded rows.",
   create_chart: "Create a chart from a source range (include header row/column for labels) on the same sheet.",
   autofit_columns: "Auto-fit column widths for the columns covering the range.",
+  find_replace:
+    "Find and replace text in cell contents. address limits the search; omit it to search the whole active sheet. replace may be '' to delete the text. matchCase and matchEntireCell default to false. Returns how many cells changed. Undoable.",
+  conditional_format:
+    "Add a conditional formatting rule that highlights cells automatically. rule 'cellValue': operator (GreaterThan, LessThan, GreaterThanOrEqual, LessThanOrEqual, EqualTo, NotEqualTo, Between, NotBetween) with value1 (and value2 for Between/NotBetween) plus fillColor and/or fontColor. rule 'text': cells containing text, plus fillColor and/or fontColor. rule 'colorScale': minColor and maxColor (optional midColor) gradient. Colours are hex like #FFC7CE (light red fill) with #9C0006 (dark red font). Numbers or text only for values; start a value with '=' for a cell reference like =$F$1.",
   create_pivot_table:
-    "Create a PivotTable from a source range whose first row is headers (every header non-blank and unique). rows/columns/filters/values use header names exactly. If destinationAddress is omitted, a new worksheet is created. summarizeBy: sum|count|average|max|min. Read the source headers first if unsure of names.",
+    "Create a PivotTable from a source range whose first row is headers (every header non-blank and unique). rows/columns/filters/values use header names exactly. If destinationAddress is omitted, a new worksheet is created. summarizeBy: sum|count|average|max|min. Read the source headers first if unsure of names. If the source has rows hidden by a filter, only the visible rows are used (via a copied snapshot sheet) unless visibleRowsOnly is false. The source may be a whole sheet or whole columns; only the used part is read.",
 };
 
 export interface ToolDeclaration {

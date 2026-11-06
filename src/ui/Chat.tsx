@@ -6,13 +6,13 @@ import { runAgent, type AgentEvent, type ChatMessage } from "../agent/loop";
 import { SYSTEM_PROMPT } from "../agent/prompt";
 import { createExcelExecutor } from "../excel/executors";
 import { buildLiveContext } from "../excel/liveContext";
-import { isExcelHost } from "../excel/readSelection";
+import { browserChatStore, type Line } from "../lib/chatStore";
+import { copyText } from "../lib/clipboard";
+import { friendlyError } from "../lib/friendlyError";
+import { summarizeRange } from "../excel/context";
+import { isExcelHost, readSelection } from "../excel/readSelection";
+import { DEFAULT_SUGGESTIONS, suggestPrompts } from "../excel/suggestions";
 import { createUndoLog } from "../excel/undo";
-
-type Line =
-  | { readonly id: number; readonly kind: "user" | "assistant" | "note"; readonly text: string }
-  | { readonly id: number; readonly kind: "action"; readonly text: string; readonly ok: boolean }
-  | { readonly id: number; readonly kind: "error"; readonly text: string };
 
 type NewLine = Line extends infer L ? (L extends Line ? Omit<L, "id"> : never) : never;
 
@@ -22,12 +22,6 @@ interface Props {
 }
 
 const KEEP_USER_TURNS = 4;
-const EXAMPLES = [
-  "Add a Total column that multiplies Qty by Price",
-  "Bold the header row and add a light blue fill",
-  "Sort by the second column, largest first",
-  "Make a column chart from my selection",
-];
 
 const colorFor = (line: Line): string => {
   switch (line.kind) {
@@ -39,14 +33,27 @@ const colorFor = (line: Line): string => {
   }
 };
 
+const workbookKeyOf = (): string => {
+  try {
+    return Office.context.document.url || "default";
+  } catch {
+    return "default";
+  }
+};
+
 export const Chat = ({ apiKey, modelId }: Props) => {
-  const [lines, setLines] = useState<readonly Line[]>([]);
+  const chatStore = useMemo(() => browserChatStore(), []);
+  const workbookKey = useMemo(workbookKeyOf, []);
+  const [lines, setLines] = useState<readonly Line[]>(() => chatStore.load(workbookKey));
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const lastCommandRef = useRef([...lines].reverse().find((l) => l.kind === "user")?.text ?? "");
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const [suggestions, setSuggestions] = useState<readonly string[]>(DEFAULT_SUGGESTIONS);
   const historyRef = useRef<readonly ChatMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
-  const idRef = useRef(0);
+  const idRef = useRef(Math.max(0, ...chatStore.load(workbookKey).map((l) => l.id)));
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const undo = useMemo(() => createUndoLog(), []);
@@ -59,6 +66,23 @@ export const Chat = ({ apiKey, modelId }: Props) => {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [lines]);
+
+  useEffect(() => {
+    chatStore.save(workbookKey, lines);
+  }, [chatStore, workbookKey, lines]);
+
+  // Refresh selection-aware chips whenever the chat is empty (mount, after Clear chat).
+  const isEmpty = lines.length === 0;
+  useEffect(() => {
+    if (!isEmpty || !isExcelHost()) return;
+    let cancelled = false;
+    readSelection()
+      .then((snap) => !cancelled && setSuggestions(suggestPrompts(summarizeRange(snap))))
+      .catch(() => !cancelled && setSuggestions(DEFAULT_SUGGESTIONS));
+    return () => {
+      cancelled = true;
+    };
+  }, [isEmpty]);
 
   const push = useCallback((line: NewLine) => {
     idRef.current += 1;
@@ -83,6 +107,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         return;
       }
       setInput("");
+      lastCommandRef.current = text;
       push({ kind: "user", text });
       setRunning(true);
       undo.beginGroup(text.slice(0, 60));
@@ -104,7 +129,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         else if (result.hitStepLimit) push({ kind: "note", text: "Stopped after the step limit. Ask me to continue if needed." });
       } catch (err) {
         if (controller.signal.aborted) push({ kind: "note", text: "Stopped." });
-        else push({ kind: "error", text: err instanceof Error ? err.message : "Something went wrong." });
+        else push({ kind: "error", text: friendlyError(err) });
       } finally {
         abortRef.current = null;
         setRunning(false);
@@ -119,7 +144,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
     setCanUndo(undo.canUndo());
     if (!outcome) return;
     const failed = outcome.failed.length > 0 ? ` (${outcome.failed.length} could not be restored)` : "";
-    push({ kind: "note", text: `Undid "${outcome.label}": ${outcome.restored} step(s)${failed}. Formatting is not restored.` });
+    push({ kind: "note", text: `Undid "${outcome.label}": ${outcome.restored} step(s)${failed}.` });
   }, [undo, push]);
 
   return (
@@ -128,7 +153,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         {lines.length === 0 && (
           <div style={{ display: "grid", gap: 6 }}>
             <Text size={200}>Tell me what to do with your sheet. Try:</Text>
-            {EXAMPLES.map((ex) => (
+            {suggestions.map((ex) => (
               <Button key={ex} size="small" appearance="outline" style={{ justifyContent: "flex-start", textAlign: "left", height: "auto", padding: "4px 8px" }} onClick={() => setInput(ex)}>
                 {ex}
               </Button>
@@ -138,6 +163,17 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         {lines.map((l) => (
           <div key={l.id} style={{ background: colorFor(l), borderRadius: 6, padding: "6px 8px", fontSize: 13, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
             {l.text}
+            {(l.kind === "assistant" || l.kind === "error") && (
+              <div style={{ textAlign: "right" }}>
+                <Button
+                  size="small"
+                  appearance="transparent"
+                  onClick={() => void copyText(l.text).then((done) => done && setCopiedId(l.id))}
+                >
+                  {copiedId === l.id ? "Copied" : "Copy"}
+                </Button>
+              </div>
+            )}
           </div>
         ))}
         {running && <Spinner size="tiny" label="Working..." labelPosition="after" />}
@@ -146,6 +182,9 @@ export const Chat = ({ apiKey, modelId }: Props) => {
 
       <div style={{ display: "flex", gap: 6 }}>
         <Button size="small" onClick={() => void doUndo()} disabled={!canUndo || running}>Undo last</Button>
+        <Button size="small" onClick={() => void send(lastCommandRef.current)} disabled={running || !lastCommandRef.current}>
+          Retry last
+        </Button>
         <Button size="small" appearance="subtle" onClick={() => { setLines([]); historyRef.current = []; }} disabled={running}>
           Clear chat
         </Button>

@@ -90,6 +90,72 @@ describe("create_pivot_table", () => {
   });
 });
 
+describe("conditional_format", () => {
+  it("accepts a cellValue rule with a fill", () => {
+    expect(
+      parseToolCall("conditional_format", {
+        address: "B2:B50",
+        rule: "cellValue",
+        operator: "GreaterThan",
+        value1: 100,
+        fillColor: "#FFC7CE",
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("requires value2 for Between and an operator for cellValue", () => {
+    const base = { address: "B2:B50", rule: "cellValue", value1: 1, fillColor: "#FFC7CE" };
+    expect(parseToolCall("conditional_format", { ...base, operator: "Between" }).ok).toBe(false);
+    expect(parseToolCall("conditional_format", { ...base, operator: "Between", value2: 5 }).ok).toBe(true);
+    expect(parseToolCall("conditional_format", base).ok).toBe(false);
+  });
+
+  it("requires some formatting for cellValue and text rules", () => {
+    expect(
+      parseToolCall("conditional_format", { address: "A1:A9", rule: "cellValue", operator: "EqualTo", value1: 1 }).ok,
+    ).toBe(false);
+    expect(parseToolCall("conditional_format", { address: "A1:A9", rule: "text", text: "Late" }).ok).toBe(false);
+    expect(parseToolCall("conditional_format", { address: "A1:A9", rule: "text", text: "Late", fontColor: "#9C0006" }).ok).toBe(true);
+  });
+
+  it("validates colour scales", () => {
+    expect(parseToolCall("conditional_format", { address: "A1:A9", rule: "colorScale", minColor: "#FFFFFF" }).ok).toBe(false);
+    expect(
+      parseToolCall("conditional_format", { address: "A1:A9", rule: "colorScale", minColor: "#FFFFFF", maxColor: "#63BE7B" }).ok,
+    ).toBe(true);
+  });
+
+  it("rejects unknown rules and bad colours", () => {
+    expect(parseToolCall("conditional_format", { address: "A1", rule: "iconSet" }).ok).toBe(false);
+    expect(
+      parseToolCall("conditional_format", { address: "A1", rule: "text", text: "x", fillColor: "red" }).ok,
+    ).toBe(false);
+  });
+});
+
+describe("find_replace", () => {
+  it("accepts a minimal call and applies defaults", () => {
+    const r = parseToolCall("find_replace", { find: "N/A", replace: "" });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.call.name === "find_replace") {
+      expect(r.call.args.matchCase).toBe(false);
+      expect(r.call.args.matchEntireCell).toBe(false);
+      expect(r.call.args.address).toBeUndefined();
+    }
+  });
+
+  it("accepts a scoped address and options", () => {
+    expect(
+      parseToolCall("find_replace", { address: "Sheet1!B:B", find: "USA", replace: "United States", matchCase: true, matchEntireCell: true }).ok,
+    ).toBe(true);
+  });
+
+  it("rejects an empty find string and bad addresses", () => {
+    expect(parseToolCall("find_replace", { find: "", replace: "x" }).ok).toBe(false);
+    expect(parseToolCall("find_replace", { address: "nope!!", find: "a", replace: "b" }).ok).toBe(false);
+  });
+});
+
 describe("toolDeclarations", () => {
   it("exposes every tool with name, description and object schema", () => {
     expect(toolDeclarations.length).toBeGreaterThanOrEqual(8);

@@ -1,25 +1,37 @@
 import type { CellValue, RangeSnapshot } from "./context";
+import { keepVisibleRows } from "./visibility";
+import { loadRowHidden, MAX_SCAN_ROWS } from "./visibleRange";
 
 const MAX_ROWS_READ = 200;
 
-/** Reads the current selection (capped to MAX_ROWS_READ rows) from Excel. */
+/**
+ * Reads the current selection from Excel: only the used part of it (so selecting a whole sheet or
+ * column works) and only rows that are visible (so a filtered table gives the filtered rows).
+ */
 export const readSelection = async (): Promise<RangeSnapshot> =>
   Excel.run(async (context) => {
     const selected = context.workbook.getSelectedRange();
-    selected.load(["rowCount", "address"]);
+    selected.load("address");
+    const used = selected.getUsedRangeOrNullObject(true);
+    used.load(["rowCount", "address"]);
     const sheet = selected.worksheet;
     sheet.load("name");
     await context.sync();
 
-    const rows = Math.min(selected.rowCount, MAX_ROWS_READ);
-    const capped = selected.getRow(0).getResizedRange(rows - 1, 0);
-    capped.load(["values", "address"]);
-    await context.sync();
+    if (used.isNullObject) return { sheetName: sheet.name, address: selected.address, values: [] };
 
+    const scanRows = Math.min(used.rowCount, MAX_SCAN_ROWS);
+    const scanned = used.getRow(0).getResizedRange(scanRows - 1, 0);
+    scanned.load("values");
+    await context.sync();
+    const hidden = await loadRowHidden(context, scanned, scanRows);
+
+    const visible = keepVisibleRows(scanned.values as CellValue[][], hidden);
     return {
       sheetName: sheet.name,
-      address: capped.address,
-      values: capped.values as CellValue[][],
+      address: used.address,
+      values: visible.rows.slice(0, MAX_ROWS_READ + 1),
+      hiddenRowCount: visible.hiddenCount,
     };
   });
 

@@ -56,6 +56,11 @@ describe("summarizeRange", () => {
     expect(s.sampleRows).toEqual([]);
   });
 
+  it("reports rows hidden by a filter", () => {
+    expect(summarizeRange({ ...input(values), hiddenRowCount: 7 }).hiddenRowCount).toBe(7);
+    expect(summarizeRange(input(values)).hiddenRowCount).toBe(0);
+  });
+
   it("stringifies blank header cells as column letters", () => {
     const s = summarizeRange(input([["Name", null], ["a", 1]]));
     expect(s.headers).toEqual(["Name", "Column B"]);

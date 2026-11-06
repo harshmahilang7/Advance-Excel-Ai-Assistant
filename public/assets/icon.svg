@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2A9D5C"/>
+      <stop offset="1" stop-color="#15593A"/>
+    </linearGradient>
+  </defs>
+  <!-- Excel-green tile -->
+  <rect width="128" height="128" rx="26" fill="url(#bg)"/>
+  <!-- spreadsheet card -->
+  <rect x="16" y="32" width="68" height="68" rx="9" fill="#FFFFFF"/>
+  <rect x="16" y="32" width="68" height="22" rx="9" fill="#CDEBD9"/>
+  <rect x="16" y="45" width="68" height="9" fill="#CDEBD9"/>
+  <g stroke="#2A9D5C" stroke-width="3.5" stroke-linecap="round">
+    <line x1="16" y1="54" x2="84" y2="54"/>
+    <line x1="16" y1="77" x2="84" y2="77"/>
+    <line x1="39" y1="32" x2="39" y2="100"/>
+    <line x1="62" y1="32" x2="62" y2="100"/>
+  </g>
+  <!-- AI sparkles -->
+  <path d="M96 14 Q96 38 120 38 Q96 38 96 62 Q96 38 72 38 Q96 38 96 14 Z" fill="#FFD43B" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M106 66 Q106 78 118 78 Q106 78 106 90 Q106 78 94 78 Q106 78 106 66 Z" fill="#FFFFFF"/>
+</svg>

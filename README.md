@@ -24,13 +24,13 @@ The model reads your selection, calls tools, and the add-in applies them to the 
 |---|---|
 | Read | `get_workbook_info`, `read_range` |
 | Write | `write_cells` (values and formulas), `clear_range` |
-| Format | `format_range` (bold, italic, colours, number format, alignment, wrap), `autofit_columns` |
-| Data | `sort_range`, `create_table` |
+| Format | `format_range` (bold, italic, colours, number format, alignment, wrap), `conditional_format` (cell value, text, colour scale), `autofit_columns` |
+| Data | `sort_range`, `create_table`, `find_replace` |
 | Visuals | `create_chart`, `create_pivot_table` |
 
-Also: a model picker (listed from your key), a **Stop** button, and **Undo last** for the previous command.
+Also: selection-aware suggestion chips, **Retry last**, a **Copy** button on replies, chat history kept per workbook in local browser storage (display only; the model does not remember it after a reload), plain-English Excel error messages, a model picker limited to models that suit spreadsheet work (**Gemini 3.8 Flash** by default, plus 3.6 Flash and 3.1 Pro; image, speech, live and lite models are hidden), a **Stop** button, and **Undo last** for the previous command.
 
-**Undo covers** cell contents and formulas, sorts, tables, charts and PivotTables. **It does not restore formatting.**
+**Undo covers** cell contents and formulas, sorts, tables, charts and PivotTables. formatting (font, fill, alignment, wrap, number format) for ranges up to 5,000 cells on Excel API 1.9+. Larger ranges, such as whole columns, are not restored; the step line says so.
 
 ## How it works
 
@@ -153,7 +153,7 @@ src/
   excel/                Excel executors, selection summary, undo log, pivot field matching
   ui/                   React components (key gate, chat, app shell)
   lib/                  Key storage
-scripts/make-icons.mjs  Generates placeholder icons
+public/assets/icon.svg  Source icon; `npm run icons` renders the PNG sizes
 ```
 
 ## Troubleshooting
@@ -166,10 +166,10 @@ scripts/make-icons.mjs  Generates placeholder icons
 
 ## Limitations and roadmap
 
-- Undo does not restore formatting
+- Formatting undo skips ranges over 5,000 cells and ignores borders
 - The model sees your selection summary, not the entire workbook, unless it reads ranges itself
 - Desktop Excel is the tested target; Excel on the web is untested
-- Ideas: formatting undo, conditional formatting, data cleaning helpers, multi-sheet awareness, other model providers
+- Ideas: conditional formatting, data cleaning helpers, multi-sheet awareness, other model providers
 
 ## Contributing
 
