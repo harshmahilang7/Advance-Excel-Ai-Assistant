@@ -156,6 +156,79 @@ describe("find_replace", () => {
   });
 });
 
+describe("sheet tools", () => {
+  it("accepts valid sheet names", () => {
+    expect(parseToolCall("add_sheet", { name: "Q3 Summary" }).ok).toBe(true);
+    expect(parseToolCall("rename_sheet", { currentName: "Sheet1", newName: "Data" }).ok).toBe(true);
+  });
+
+  it("rejects names Excel does not allow", () => {
+    for (const name of ["", "a/b", "a:b", "a[1]", "x*y", "q?", "a".repeat(32), "'quoted"]) {
+      expect(parseToolCall("add_sheet", { name }).ok).toBe(false);
+    }
+    expect(parseToolCall("rename_sheet", { currentName: "Sheet1", newName: "bad\\name" }).ok).toBe(false);
+  });
+});
+
+describe("freeze_panes", () => {
+  it("defaults to unfreezing and bounds the counts", () => {
+    const r = parseToolCall("freeze_panes", {});
+    expect(r.ok).toBe(true);
+    if (r.ok && r.call.name === "freeze_panes") expect(r.call.args).toMatchObject({ rows: 0, columns: 0 });
+    expect(parseToolCall("freeze_panes", { rows: 1, columns: 2 }).ok).toBe(true);
+    expect(parseToolCall("freeze_panes", { rows: -1 }).ok).toBe(false);
+    expect(parseToolCall("freeze_panes", { rows: 1000 }).ok).toBe(false);
+  });
+});
+
+describe("data_validation", () => {
+  it("accepts a dropdown list", () => {
+    expect(parseToolCall("data_validation", { address: "C2:C50", rule: "list", listValues: ["Open", "Closed"] }).ok).toBe(true);
+  });
+
+  it("rejects lists that are missing, empty, or contain commas", () => {
+    expect(parseToolCall("data_validation", { address: "C2:C50", rule: "list" }).ok).toBe(false);
+    expect(parseToolCall("data_validation", { address: "C2:C50", rule: "list", listValues: [] }).ok).toBe(false);
+    expect(parseToolCall("data_validation", { address: "C2:C50", rule: "list", listValues: ["a,b"] }).ok).toBe(false);
+  });
+
+  it("validates numeric rules", () => {
+    const base = { address: "B2:B9", rule: "wholeNumber", value1: 1 };
+    expect(parseToolCall("data_validation", base).ok).toBe(false);
+    expect(parseToolCall("data_validation", { ...base, operator: "GreaterThan" }).ok).toBe(true);
+    expect(parseToolCall("data_validation", { ...base, operator: "Between" }).ok).toBe(false);
+    expect(parseToolCall("data_validation", { ...base, operator: "Between", value2: 10 }).ok).toBe(true);
+  });
+
+  it("allows clearing validation", () => {
+    expect(parseToolCall("data_validation", { address: "B2:B9", rule: "clear" }).ok).toBe(true);
+  });
+});
+
+describe("remove_duplicates", () => {
+  it("needs at least one column index", () => {
+    expect(parseToolCall("remove_duplicates", { address: "A1:C20", columnIndexes: [0], hasHeaders: true }).ok).toBe(true);
+    expect(parseToolCall("remove_duplicates", { address: "A1:C20", columnIndexes: [], hasHeaders: true }).ok).toBe(false);
+    expect(parseToolCall("remove_duplicates", { address: "A1:C20", columnIndexes: [-1], hasHeaders: true }).ok).toBe(false);
+  });
+});
+
+describe("filter_range", () => {
+  it("accepts apply with and without criteria, and remove", () => {
+    expect(parseToolCall("filter_range", { address: "A1:D50", action: "apply" }).ok).toBe(true);
+    expect(parseToolCall("filter_range", { address: "A1:D50", action: "apply", columnIndex: 1, values: ["East"] }).ok).toBe(true);
+    expect(parseToolCall("filter_range", { address: "A1:D50", action: "remove" }).ok).toBe(true);
+  });
+
+  it("requires columnIndex when values are given", () => {
+    expect(parseToolCall("filter_range", { address: "A1:D50", action: "apply", values: ["East"] }).ok).toBe(false);
+  });
+
+  it("rejects unknown actions", () => {
+    expect(parseToolCall("filter_range", { address: "A1:D50", action: "explode" }).ok).toBe(false);
+  });
+});
+
 describe("toolDeclarations", () => {
   it("exposes every tool with name, description and object schema", () => {
     expect(toolDeclarations.length).toBeGreaterThanOrEqual(8);

@@ -25,7 +25,8 @@ The model reads your selection, calls tools, and the add-in applies them to the 
 | Read | `get_workbook_info`, `read_range` |
 | Write | `write_cells` (values and formulas), `clear_range` |
 | Format | `format_range` (bold, italic, colours, number format, alignment, wrap), `conditional_format` (cell value, text, colour scale), `autofit_columns` |
-| Data | `sort_range`, `create_table`, `find_replace` |
+| Data | `sort_range`, `create_table`, `find_replace`, `remove_duplicates`, `filter_range`, `data_validation` (dropdowns, number and text-length limits) |
+| Sheets | `add_sheet`, `rename_sheet`, `freeze_panes` |
 | Visuals | `create_chart`, `create_pivot_table` |
 
 Also: selection-aware suggestion chips, **Retry last**, a **Copy** button on replies, chat history kept per workbook in local browser storage (display only; the model does not remember it after a reload), plain-English Excel error messages, a model picker limited to models that suit spreadsheet work (**Gemini 3.8 Flash** by default, plus 3.6 Flash and 3.1 Pro; image, speech, live and lite models are hidden), a **Stop** button, and **Undo last** for the previous command.

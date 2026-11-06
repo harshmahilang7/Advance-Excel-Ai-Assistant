@@ -44,6 +44,25 @@ const CELL_OPERATORS = [
   "NotBetween",
 ] as const;
 
+/** Excel sheet names: 1-31 chars, none of \ / ? * [ ] :, and no leading/trailing apostrophe. */
+const sheetName = z
+  .string()
+  .min(1)
+  .max(31)
+  .regex(/^[^\\/?*[\]:]+$/, "Sheet name cannot contain \\ / ? * [ ] :")
+  .refine((s) => !s.startsWith("'") && !s.endsWith("'"), "Sheet name cannot start or end with an apostrophe.");
+
+const VALIDATION_OPERATORS = [
+  "Between",
+  "NotBetween",
+  "EqualTo",
+  "NotEqualTo",
+  "GreaterThan",
+  "LessThan",
+  "GreaterThanOrEqualTo",
+  "LessThanOrEqualTo",
+] as const;
+
 const schemas = {
   get_workbook_info: z.object({}),
   read_range: z.object({
@@ -85,6 +104,45 @@ const schemas = {
     title: z.string().max(200).optional(),
   }),
   autofit_columns: z.object({ address }),
+  add_sheet: z.object({ name: sheetName }),
+  rename_sheet: z.object({ currentName: sheetName, newName: sheetName }),
+  freeze_panes: z.object({
+    rows: z.number().int().min(0).max(100).default(0),
+    columns: z.number().int().min(0).max(50).default(0),
+  }),
+  data_validation: z
+    .object({
+      address,
+      rule: z.enum(["list", "wholeNumber", "decimal", "textLength", "clear"]),
+      listValues: z.array(z.string().min(1).max(100)).min(1).max(100).optional(),
+      operator: z.enum(VALIDATION_OPERATORS).optional(),
+      value1: z.number().optional(),
+      value2: z.number().optional(),
+      errorMessage: z.string().max(255).optional(),
+    })
+    .superRefine((a, ctx) => {
+      const fail = (message: string) => ctx.addIssue({ code: "custom", message });
+      if (a.rule === "list") {
+        if (!a.listValues) fail("list rule needs listValues.");
+        else if (a.listValues.some((v) => v.includes(","))) fail("List items cannot contain commas.");
+      } else if (a.rule !== "clear") {
+        if (!a.operator || a.value1 === undefined) fail(`${a.rule} rule needs operator and value1.`);
+        else if ((a.operator === "Between" || a.operator === "NotBetween") && a.value2 === undefined) fail(`${a.operator} needs value2.`);
+      }
+    }),
+  remove_duplicates: z.object({
+    address,
+    columnIndexes: z.array(z.number().int().min(0).max(200)).min(1).max(200),
+    hasHeaders: z.boolean(),
+  }),
+  filter_range: z
+    .object({
+      address,
+      action: z.enum(["apply", "remove"]),
+      columnIndex: z.number().int().min(0).max(200).optional(),
+      values: z.array(z.string().max(255)).min(1).max(100).optional(),
+    })
+    .refine((a) => a.values === undefined || a.columnIndex !== undefined, "values needs columnIndex."),
   find_replace: z.object({
     address: address.optional(),
     find: z.string().min(1).max(255),
@@ -174,6 +232,16 @@ const descriptions: Record<ToolName, string> = {
   create_table: "Convert a range into an Excel table with filters and banded rows.",
   create_chart: "Create a chart from a source range (include header row/column for labels) on the same sheet.",
   autofit_columns: "Auto-fit column widths for the columns covering the range.",
+  add_sheet: "Add a new worksheet with the given name (max 31 chars, none of \\ / ? * [ ] :). Fails if the name is taken.",
+  rename_sheet: "Rename an existing worksheet.",
+  freeze_panes:
+    "Freeze the top `rows` rows and/or the first `columns` columns of the active sheet so they stay visible while scrolling. rows=0 and columns=0 removes any freeze.",
+  data_validation:
+    "Restrict what can be typed into a range. rule 'list': dropdown from listValues (no commas inside items). rule 'wholeNumber' | 'decimal' | 'textLength': needs operator (Between, NotBetween, EqualTo, NotEqualTo, GreaterThan, LessThan, GreaterThanOrEqualTo, LessThanOrEqualTo) and value1 (value2 for Between/NotBetween). rule 'clear' removes validation. errorMessage is shown on bad input.",
+  remove_duplicates:
+    "Delete duplicate rows in a range, comparing the columns in columnIndexes (0-based within the range). The first occurrence is kept. Set hasHeaders true if the first row is a header. Destructive but undoable.",
+  filter_range:
+    "action 'apply': turn on filter dropdowns for the range's sheet, optionally keeping only rows where column columnIndex (0-based within the range) equals one of values. action 'remove': clear the sheet's filter and show all rows.",
   find_replace:
     "Find and replace text in cell contents. address limits the search; omit it to search the whole active sheet. replace may be '' to delete the text. matchCase and matchEntireCell default to false. Returns how many cells changed. Undoable.",
   conditional_format:

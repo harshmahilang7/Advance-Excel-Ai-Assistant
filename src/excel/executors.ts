@@ -254,6 +254,151 @@ const handlers: Handlers = {
     return ok(`Created PivotTable "${name}" on ${sheetName}: ${describe}${by}. ${prepared.note}`.trim());
   },
 
+  async add_sheet(ctx, { name }, undo) {
+    const sheet = ctx.workbook.worksheets.add(name);
+    sheet.load("name");
+    await ctx.sync();
+    const created = sheet.name;
+    undo.record(`delete sheet ${created}`, () =>
+      Excel.run(async (c) => {
+        c.workbook.worksheets.getItem(created).delete();
+        await c.sync();
+      }),
+    );
+    return ok(`Added sheet "${created}"`);
+  },
+
+  async rename_sheet(ctx, { currentName, newName }, undo) {
+    const sheet = ctx.workbook.worksheets.getItem(currentName);
+    sheet.name = newName;
+    await ctx.sync();
+    undo.record(`rename sheet back to ${currentName}`, () =>
+      Excel.run(async (c) => {
+        c.workbook.worksheets.getItem(newName).name = currentName;
+        await c.sync();
+      }),
+    );
+    return ok(`Renamed sheet "${currentName}" to "${newName}"`);
+  },
+
+  async freeze_panes(ctx, { rows, columns }, undo) {
+    const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+    const before = sheet.freezePanes.getLocationOrNullObject();
+    before.load("address");
+    sheet.load("name");
+    await ctx.sync();
+    const sheetName = sheet.name;
+    const previous = before.isNullObject ? null : before.address;
+    undo.record("restore frozen panes", () =>
+      Excel.run(async (c) => {
+        const ws = c.workbook.worksheets.getItem(sheetName);
+        if (previous === null) ws.freezePanes.unfreeze();
+        else ws.freezePanes.freezeAt(resolveRange(c, previous));
+        await c.sync();
+      }),
+    );
+    if (rows === 0 && columns === 0) sheet.freezePanes.unfreeze();
+    else if (columns === 0) sheet.freezePanes.freezeRows(rows);
+    else if (rows === 0) sheet.freezePanes.freezeColumns(columns);
+    else sheet.freezePanes.freezeAt(sheet.getRangeByIndexes(0, 0, rows, columns));
+    await ctx.sync();
+    return ok(rows === 0 && columns === 0 ? "Unfroze panes" : `Froze ${rows} row(s) and ${columns} column(s) on ${sheetName}`);
+  },
+
+  async data_validation(ctx, a, undo) {
+    const range = resolveRange(ctx, a.address);
+    const dv = range.dataValidation;
+    dv.load(["type", "rule"]);
+    range.load("address");
+    await ctx.sync();
+    const fullAddress = range.address;
+    const priorType = dv.type;
+    const priorRule = dv.rule;
+    const restorable = priorType !== "MixedCriteria";
+    if (restorable) {
+      undo.record(`restore validation on ${fullAddress}`, () =>
+        Excel.run(async (c) => {
+          const target = resolveRange(c, fullAddress).dataValidation;
+          target.clear();
+          if (priorType !== "None") target.rule = priorRule;
+          await c.sync();
+        }),
+      );
+    }
+    const note = restorable ? "" : " (previous mixed validation cannot be restored by undo)";
+
+    if (a.rule === "clear") {
+      dv.clear();
+      await ctx.sync();
+      return ok(`Cleared validation on ${fullAddress}${note}`);
+    }
+    dv.clear();
+    if (a.rule === "list") {
+      dv.rule = { list: { inCellDropDown: true, source: (a.listValues ?? []).join(",") } };
+    } else {
+      const numeric = {
+        formula1: a.value1 as number,
+        ...(a.value2 !== undefined ? { formula2: a.value2 } : {}),
+        operator: a.operator as Excel.DataValidationOperator,
+      };
+      dv.rule = { [a.rule]: numeric } as Excel.DataValidationRule;
+    }
+    if (a.errorMessage) {
+      dv.errorAlert = { message: a.errorMessage, showAlert: true, style: "Stop", title: "Invalid entry" };
+    }
+    await ctx.sync();
+    return ok(`Set ${a.rule} validation on ${fullAddress}${note}`);
+  },
+
+  async remove_duplicates(ctx, { address, columnIndexes, hasHeaders }, undo) {
+    if (!Office.context.requirements.isSetSupported("ExcelApi", "1.9")) {
+      return { ok: false, error: "Removing duplicates needs Excel API 1.9 or newer. Update Excel." };
+    }
+    const range = resolveRange(ctx, address);
+    range.load("columnCount");
+    await ctx.sync();
+    if (columnIndexes.some((i) => i >= range.columnCount)) {
+      return { ok: false, error: `columnIndexes must be between 0 and ${range.columnCount - 1} for ${address}.` };
+    }
+    const where = await snapshotFormulas(ctx, range, undo);
+    const result = range.removeDuplicates([...columnIndexes], hasHeaders);
+    await ctx.sync();
+    return ok(`Removed ${result.removed} duplicate row(s) from ${where}; ${result.uniqueRemaining} remain`);
+  },
+
+  async filter_range(ctx, { address, action, columnIndex, values }, undo) {
+    const range = resolveRange(ctx, address);
+    const sheet = range.worksheet;
+    sheet.autoFilter.load("enabled");
+    sheet.load("name");
+    await ctx.sync();
+    const sheetName = sheet.name;
+    const hadFilter = sheet.autoFilter.enabled;
+
+    if (action === "remove") {
+      sheet.autoFilter.remove();
+      await ctx.sync();
+      return ok(`Removed the filter on ${sheetName}${hadFilter ? " (undo cannot bring the old criteria back)" : ""}`);
+    }
+    if (hadFilter) sheet.autoFilter.remove();
+    if (columnIndex !== undefined && values) {
+      sheet.autoFilter.apply(range, columnIndex, { filterOn: "Values", values: [...values] });
+    } else {
+      sheet.autoFilter.apply(range);
+    }
+    await ctx.sync();
+    if (!hadFilter) {
+      undo.record(`remove filter on ${sheetName}`, () =>
+        Excel.run(async (c) => {
+          c.workbook.worksheets.getItem(sheetName).autoFilter.remove();
+          await c.sync();
+        }),
+      );
+    }
+    const by = values ? ` where column ${(columnIndex ?? 0) + 1} is ${values.join(" / ")}` : "";
+    return ok(`Filtered ${sheetName}${by}${hadFilter ? " (replaced the existing filter; undo cannot restore it)" : ""}`);
+  },
+
   async find_replace(ctx, a, undo) {
     if (!Office.context.requirements.isSetSupported("ExcelApi", "1.9")) {
       return { ok: false, error: "Find & replace needs Excel API 1.9 or newer. Update Excel." };
