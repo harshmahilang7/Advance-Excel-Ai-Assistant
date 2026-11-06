@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Spinner, Text, Textarea } from "@fluentui/react-components";
+import { Button, Spinner, Switch, Text, Textarea } from "@fluentui/react-components";
+import { applyPending, createPreviewExecutor, type PendingCall } from "../agent/preview";
 import { createGeminiClient } from "../agent/geminiClient";
 import { trimHistory } from "../agent/history";
 import { runAgent, type AgentEvent, type ChatMessage } from "../agent/loop";
@@ -33,7 +34,9 @@ const colorFor = (line: Line): string => {
   }
 };
 
-const workbookKeyOf = (): string => {
+const WAITING = "Waiting for the AI...";
+
+const workbookKeyOf =(): string => {
   try {
     return Office.context.document.url || "default";
   } catch {
@@ -50,6 +53,11 @@ export const Chat = ({ apiKey, modelId }: Props) => {
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const [status, setStatus] = useState(WAITING);
+  const [previewMode, setPreviewMode] = useState(false);
+  const [pending, setPending] = useState<readonly PendingCall[]>([]);
+  const pendingLabelRef = useRef("");
+  const discardNoteRef = useRef("");
   const [suggestions, setSuggestions] = useState<readonly string[]>(DEFAULT_SUGGESTIONS);
   const historyRef = useRef<readonly ChatMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -93,7 +101,10 @@ export const Chat = ({ apiKey, modelId }: Props) => {
   const onEvent = useCallback(
     (e: AgentEvent) => {
       if (e.type === "text") push({ kind: "assistant", text: e.text });
-      else push({ kind: "action", ok: e.ok, text: `${e.ok ? "✓" : "⚠"} ${e.summary}` });
+      else {
+        push({ kind: "action", ok: e.ok, text: `${e.ok ? "✓" : "⚠"} ${e.summary}` });
+        setStatus(`${WAITING} Last step: ${e.summary}`);
+      }
     },
     [push],
   );
@@ -109,15 +120,23 @@ export const Chat = ({ apiKey, modelId }: Props) => {
       setInput("");
       lastCommandRef.current = text;
       push({ kind: "user", text });
+      setStatus(WAITING);
       setRunning(true);
       undo.beginGroup(text.slice(0, 60));
       const controller = new AbortController();
       abortRef.current = controller;
+      let queued: readonly PendingCall[] = [];
+      const runner = previewMode
+        ? createPreviewExecutor(execute, (c) => {
+            queued = [...queued, c];
+          })
+        : execute;
       try {
-        const context = await buildLiveContext();
+        const context = discardNoteRef.current + (await buildLiveContext());
+        discardNoteRef.current = "";
         const result = await runAgent({
           model,
-          execute,
+          execute: runner,
           userMessage: text,
           context,
           history: historyRef.current,
@@ -134,10 +153,36 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         abortRef.current = null;
         setRunning(false);
         setCanUndo(undo.canUndo());
+        if (queued.length > 0) {
+          setPending(queued);
+          pendingLabelRef.current = text.slice(0, 60);
+        }
       }
     },
-    [running, push, undo, model, execute, onEvent],
+    [running, previewMode, push, undo, model, execute, onEvent],
   );
+
+  const applyChanges = useCallback(async () => {
+    if (pending.length === 0 || running) return;
+    setStatus(`Applying ${pending.length} change(s) to the workbook...`);
+    setRunning(true);
+    undo.beginGroup(pendingLabelRef.current);
+    try {
+      const outcome = await applyPending(execute, pending);
+      for (const step of outcome.results) push({ kind: "action", ok: step.ok, text: `${step.ok ? "✓" : "⚠"} ${step.text}` });
+      if (outcome.skipped > 0) push({ kind: "note", text: `Stopped after a failure; ${outcome.skipped} queued change(s) were not applied.` });
+    } finally {
+      setPending([]);
+      setRunning(false);
+      setCanUndo(undo.canUndo());
+    }
+  }, [pending, running, undo, execute, push]);
+
+  const discardChanges = useCallback(() => {
+    push({ kind: "note", text: `Discarded ${pending.length} queued change(s). Nothing was changed.` });
+    discardNoteRef.current = "[Note: the changes queued for the previous request were discarded by the user and NOT applied to the workbook.]\n";
+    setPending([]);
+  }, [pending.length, push]);
 
   const doUndo = useCallback(async () => {
     const outcome = await undo.undoLast();
@@ -176,16 +221,56 @@ export const Chat = ({ apiKey, modelId }: Props) => {
             )}
           </div>
         ))}
-        {running && <Spinner size="tiny" label="Working..." labelPosition="after" />}
+        {pending.length > 0 && !running && (
+          <div style={{ background: "#fff4ce", borderRadius: 6, padding: "6px 8px", fontSize: 13, display: "grid", gap: 6 }}>
+            <Text weight="semibold" size={200}>Review {pending.length} queued change(s). Nothing has been applied yet.</Text>
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              {pending.map((p, i) => (
+                <li key={i} style={{ overflowWrap: "anywhere" }}>{p.summary}</li>
+              ))}
+            </ol>
+            <div style={{ display: "flex", gap: 6 }}>
+              <Button size="small" appearance="primary" onClick={() => void applyChanges()}>Apply</Button>
+              <Button size="small" onClick={discardChanges}>Discard</Button>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
+      {running && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 10px",
+            borderRadius: 6,
+            background: "#e8f1fb",
+            border: "1px solid #b3d1f2",
+            fontSize: 13,
+          }}
+        >
+          <Spinner size="tiny" />
+          <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{status}</span>
+        </div>
+      )}
+
+      <Switch
+        checked={previewMode}
+        onChange={(_, d) => setPreviewMode(d.checked)}
+        label="Preview changes before applying"
+        disabled={running || pending.length > 0}
+      />
+
       <div style={{ display: "flex", gap: 6 }}>
-        <Button size="small" onClick={() => void doUndo()} disabled={!canUndo || running}>Undo last</Button>
-        <Button size="small" onClick={() => void send(lastCommandRef.current)} disabled={running || !lastCommandRef.current}>
+        <Button size="small" onClick={() => void doUndo()} disabled={!canUndo || running || pending.length > 0}>Undo last</Button>
+        <Button size="small" onClick={() => void send(lastCommandRef.current)} disabled={running || pending.length > 0 || !lastCommandRef.current}>
           Retry last
         </Button>
-        <Button size="small" appearance="subtle" onClick={() => { setLines([]); historyRef.current = []; }} disabled={running}>
+        <Button size="small" appearance="subtle" onClick={() => { setLines([]); setPending([]); historyRef.current = []; }} disabled={running}>
           Clear chat
         </Button>
       </div>
@@ -196,7 +281,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         placeholder="e.g. Add a column that totals each row"
         resize="vertical"
         rows={3}
-        disabled={running}
+        disabled={running || pending.length > 0}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -207,7 +292,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
       {running ? (
         <Button onClick={() => abortRef.current?.abort()}>Stop</Button>
       ) : (
-        <Button appearance="primary" disabled={!input.trim()} onClick={() => void send(input)}>Send</Button>
+        <Button appearance="primary" disabled={!input.trim() || pending.length > 0} onClick={() => void send(input)}>Send</Button>
       )}
     </div>
   );
