@@ -1,6 +1,7 @@
 import { GoogleGenAI, type Content, type FunctionDeclaration, type Part } from "@google/genai";
 import type { ChatMessage, ModelClient, ModelTurn, RawToolCall } from "./loop";
 import { describeGeminiError } from "./gemini";
+import { deltaText, mergeChunks } from "./streamMerge";
 import { toolDeclarations } from "./tools";
 
 interface ClientOptions {
@@ -47,9 +48,9 @@ export const createGeminiClient = ({ apiKey, model, systemInstruction }: ClientO
   const functionDeclarations = toolDeclarations as unknown as FunctionDeclaration[];
 
   return {
-    async generate(history, signal) {
+    async generate(history, signal, onText) {
       try {
-        const response = await ai.models.generateContent({
+        const stream = await ai.models.generateContentStream({
           model,
           contents: history.map(toContent),
           config: {
@@ -58,12 +59,19 @@ export const createGeminiClient = ({ apiKey, model, systemInstruction }: ClientO
             abortSignal: signal,
           },
         });
-        const candidate = response.candidates?.[0];
-        if (!candidate?.content) {
-          const reason = candidate?.finishReason ?? response.promptFeedback?.blockReason ?? "no response";
-          throw new Error(`Gemini returned nothing (${reason}). Try rephrasing.`);
+        const chunks: Content[] = [];
+        let reason: string | undefined;
+        for await (const chunk of stream) {
+          const candidate = chunk.candidates?.[0];
+          reason = candidate?.finishReason ?? chunk.promptFeedback?.blockReason ?? reason;
+          if (!candidate?.content) continue;
+          chunks.push(candidate.content);
+          const delta = deltaText(candidate.content);
+          if (delta) onText?.(delta);
         }
-        return readTurn(candidate.content);
+        const content = mergeChunks(chunks);
+        if (!content) throw new Error(`Gemini returned nothing (${reason ?? "no response"}). Try rephrasing.`);
+        return readTurn(content);
       } catch (err) {
         if (signal?.aborted) throw err;
         throw new Error(describeGeminiError(err));

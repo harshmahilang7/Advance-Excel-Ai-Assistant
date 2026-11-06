@@ -24,8 +24,12 @@ export type ChatMessage =
   | { readonly role: "tool"; readonly results: readonly ToolResponse[] };
 
 export interface ModelClient {
-  generate(history: readonly ChatMessage[], signal?: AbortSignal): Promise<ModelTurn>;
+  /** `onText` receives visible reply text as it streams in. Clients that cannot stream may ignore it. */
+  generate(history: readonly ChatMessage[], signal?: AbortSignal, onText?: (delta: string) => void): Promise<ModelTurn>;
 }
+
+/** Live reply text: `delta` while a model turn streams, `end` once that turn is complete (or failed). */
+export type StreamEvent = { readonly type: "delta"; readonly text: string } | { readonly type: "end" };
 
 export type ToolResult =
   | { readonly ok: true; readonly summary: string; readonly data: unknown }
@@ -47,6 +51,7 @@ export interface AgentRun {
   readonly maxSteps?: number;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: AgentEvent) => void;
+  readonly onStream?: (event: StreamEvent) => void;
 }
 
 export interface AgentResult {
@@ -89,7 +94,12 @@ export const runAgent = async (run: AgentRun): Promise<AgentResult> => {
   for (let step = 0; step < maxSteps; step++) {
     if (run.signal?.aborted) return { finalText: lastText, toolCalls, hitStepLimit: false, aborted: true, history };
 
-    const turn = await run.model.generate(history, run.signal);
+    let turn: ModelTurn;
+    try {
+      turn = await run.model.generate(history, run.signal, (text) => run.onStream?.({ type: "delta", text }));
+    } finally {
+      run.onStream?.({ type: "end" });
+    }
     history = [...history, { role: "model", text: turn.text, calls: turn.calls, raw: turn.raw }];
     if (turn.text) lastText = turn.text;
 

@@ -3,8 +3,10 @@ import { Button, Spinner, Switch, Text, Textarea } from "@fluentui/react-compone
 import { applyPending, createPreviewExecutor, type PendingCall } from "../agent/preview";
 import { createGeminiClient } from "../agent/geminiClient";
 import { trimHistory } from "../agent/history";
-import { runAgent, type AgentEvent, type ChatMessage } from "../agent/loop";
+import { runAgent, type AgentEvent, type ChatMessage, type StreamEvent } from "../agent/loop";
 import { SYSTEM_PROMPT } from "../agent/prompt";
+import { estimateHistoryTokens, estimateTokens, formatTokens, LARGE_CONTEXT_TOKENS } from "../agent/tokens";
+import { toolDeclarations } from "../agent/tools";
 import { createExcelExecutor } from "../excel/executors";
 import { buildLiveContext } from "../excel/liveContext";
 import { browserChatStore, type Line } from "../lib/chatStore";
@@ -35,6 +37,8 @@ const colorFor = (line: Line): string => {
 };
 
 const WAITING = "Waiting for the AI...";
+/** Tokens every request carries before any chat: system prompt plus tool declarations. */
+const FIXED_TOKENS = estimateTokens(SYSTEM_PROMPT) + estimateTokens(JSON.stringify(toolDeclarations));
 
 const workbookKeyOf =(): string => {
   try {
@@ -54,6 +58,8 @@ export const Chat = ({ apiKey, modelId }: Props) => {
   const [running, setRunning] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [status, setStatus] = useState(WAITING);
+  const [streamText, setStreamText] = useState("");
+  const [contextTokens, setContextTokens] = useState(FIXED_TOKENS);
   const [previewMode, setPreviewMode] = useState(false);
   const [pending, setPending] = useState<readonly PendingCall[]>([]);
   const pendingLabelRef = useRef("");
@@ -73,7 +79,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [lines]);
+  }, [lines, streamText]);
 
   useEffect(() => {
     chatStore.save(workbookKey, lines);
@@ -109,6 +115,15 @@ export const Chat = ({ apiKey, modelId }: Props) => {
     [push],
   );
 
+  const onStream = useCallback((e: StreamEvent) => {
+    if (e.type === "delta") {
+      setStreamText((prev) => prev + e.text);
+      setStatus("The AI is replying...");
+    } else {
+      setStreamText("");
+    }
+  }, []);
+
   const send = useCallback(
     async (raw: string) => {
       const text = raw.trim();
@@ -142,6 +157,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
           history: historyRef.current,
           signal: controller.signal,
           onEvent,
+          onStream,
         });
         historyRef.current = trimHistory(result.history, KEEP_USER_TURNS);
         if (result.aborted) push({ kind: "note", text: "Stopped." });
@@ -153,13 +169,14 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         abortRef.current = null;
         setRunning(false);
         setCanUndo(undo.canUndo());
+        setContextTokens(FIXED_TOKENS + estimateHistoryTokens(historyRef.current));
         if (queued.length > 0) {
           setPending(queued);
           pendingLabelRef.current = text.slice(0, 60);
         }
       }
     },
-    [running, previewMode, push, undo, model, execute, onEvent],
+    [running, previewMode, push, undo, model, execute, onEvent, onStream],
   );
 
   const applyChanges = useCallback(async () => {
@@ -221,6 +238,11 @@ export const Chat = ({ apiKey, modelId }: Props) => {
             )}
           </div>
         ))}
+        {streamText && (
+          <div style={{ background: "#ffffff", border: "1px dashed #c8c6c4", borderRadius: 6, padding: "6px 8px", fontSize: 13, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {streamText}
+          </div>
+        )}
         {pending.length > 0 && !running && (
           <div style={{ background: "#fff4ce", borderRadius: 6, padding: "6px 8px", fontSize: 13, display: "grid", gap: 6 }}>
             <Text weight="semibold" size={200}>Review {pending.length} queued change(s). Nothing has been applied yet.</Text>
@@ -258,6 +280,12 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         </div>
       )}
 
+      <Text size={100} style={{ color: contextTokens >= LARGE_CONTEXT_TOKENS ? "#a4262c" : "#605e5c" }}>
+        {contextTokens >= LARGE_CONTEXT_TOKENS
+          ? `Context is large (about ${formatTokens(contextTokens)} tokens sent each time). Click Clear chat to cut cost and speed things up.`
+          : `Each request carries about ${formatTokens(contextTokens)} tokens of context.`}
+      </Text>
+
       <Switch
         checked={previewMode}
         onChange={(_, d) => setPreviewMode(d.checked)}
@@ -270,7 +298,7 @@ export const Chat = ({ apiKey, modelId }: Props) => {
         <Button size="small" onClick={() => void send(lastCommandRef.current)} disabled={running || pending.length > 0 || !lastCommandRef.current}>
           Retry last
         </Button>
-        <Button size="small" appearance="subtle" onClick={() => { setLines([]); setPending([]); historyRef.current = []; }} disabled={running}>
+        <Button size="small" appearance="subtle" onClick={() => { setLines([]); setPending([]); historyRef.current = []; setContextTokens(FIXED_TOKENS); }} disabled={running}>
           Clear chat
         </Button>
       </div>
