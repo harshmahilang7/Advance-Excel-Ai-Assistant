@@ -157,6 +157,17 @@ src/
 public/assets/icon.svg  Source icon; `npm run icons` renders the PNG sizes
 ```
 
+## Evals
+
+`npm test` is offline. `npm run eval` is separate: it sends 21 canned prompts (add a column, sort, pivot, freeze panes, a prompt-injection cell, and so on) to the real Gemini API and checks which tools the model calls, so you can catch prompt or schema regressions. The workbook behind the tools is simulated, and arguments are checked with the real schemas.
+
+```bash
+GEMINI_API_KEY=your-key npm run eval
+# optional: EVAL_MODEL=gemini-3.6-flash  EVAL_ONLY=freeze-header,autofit  EVAL_MIN_PASS=0.9
+```
+
+It uses a little of your API quota and skips itself when no key is set. Model output varies, so a run passes at 80% by default. Cases live in `evals/cases.ts`; each carries an ideal example run that the offline tests check, so a broken case is caught without calling the API.
+
 ## Troubleshooting
 
 - **Button missing after sideload:** close all Excel windows and run `npm run sideload` once. Check the Home tab's overflow menu on narrow windows.

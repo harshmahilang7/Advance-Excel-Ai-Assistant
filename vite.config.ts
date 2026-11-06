@@ -16,5 +16,5 @@ const https =
 export default defineConfig({
   plugins: [react()],
   server: { port: 3100, strictPort: true, https },
-  test: { environment: "node", include: ["src/**/*.test.ts"] },
+  test: { environment: "node", include: ["src/**/*.test.ts", "evals/**/*.test.ts"] },
 });

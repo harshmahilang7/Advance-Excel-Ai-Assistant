@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval": "vitest run --config vitest.eval.config.ts",
     "icons": "node scripts/make-icons.mjs",
     "certs": "office-addin-dev-certs install",
     "sideload": "office-addin-debugging start manifest.xml desktop --app excel --no-debug",
