@@ -5,6 +5,7 @@ import { cleanGrid, type CleanCell } from "./cleaning";
 import { toRuleFormula } from "./conditionalFormat";
 import { auditFormulas, MAX_FINDINGS_PER_KIND } from "./formulaAudit";
 import { canSnapshotFormats, FORMAT_PROPS_REQUEST, toRestoreProps, type CellFormat } from "./formatSnapshot";
+import { readSheetOverviewIn } from "./readSheets";
 import { resolvePivotFields, type PivotAggregation } from "./pivotFields";
 import { preparePivotSource } from "./pivotSource";
 import type { UndoLog } from "./undo";
@@ -82,17 +83,9 @@ type Handlers ={ [N in ToolName]: (ctx: Ctx, args: ToolArgs<N>, undo: UndoLog) =
 
 const handlers: Handlers = {
   async get_workbook_info(ctx) {
-    const sheets = ctx.workbook.worksheets;
-    sheets.load("items/name");
-    await ctx.sync();
-    const used = sheets.items.map((ws) => {
-      const r = ws.getUsedRangeOrNullObject(true);
-      r.load("address");
-      return { ws, r };
-    });
-    await ctx.sync();
-    const info = used.map(({ ws, r }) => ({ name: ws.name, usedRange: r.isNullObject ? null : r.address }));
-    return ok(`${info.length} sheet(s)`, info);
+    const { sheets, omittedSheets } = await readSheetOverviewIn(ctx);
+    const more = omittedSheets > 0 ? `, ${omittedSheets} more not listed` : "";
+    return ok(`${sheets.length} sheet(s)${more}`, sheets.map((s) => ({ name: s.name, usedRange: s.usedRange, headers: s.headers })));
   },
 
   async read_range(ctx, { address, maxRows }) {

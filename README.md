@@ -25,7 +25,7 @@ The model reads your selection, calls tools, and the add-in applies them to the 
 | Read | `get_workbook_info`, `read_range`, `audit_formulas` (error values, formulas that break their column's pattern, typed numbers inside formula columns; hints, not proof) |
 | Write | `write_cells` (values and formulas), `clear_range` |
 | Format | `format_range` (bold, italic, colours, number format, alignment, wrap), `conditional_format` (cell value, text, colour scale), `autofit_columns` |
-| Data | `sort_range`, `create_table`, `find_replace`, `remove_duplicates`, `filter_range`, `data_validation` (dropdowns, number and text-length limits) |
+| Data | `sort_range`, `create_table`, `find_replace`, `clean_data` (trim, strip hidden characters, fill blanks down, text to numbers, change case), `remove_duplicates`, `filter_range`, `data_validation` (dropdowns, number and text-length limits) |
 | Sheets | `add_sheet`, `rename_sheet`, `freeze_panes` |
 | Visuals | `create_chart`, `create_pivot_table` |
 
@@ -159,7 +159,7 @@ public/assets/icon.svg  Source icon; `npm run icons` renders the PNG sizes
 
 ## Evals
 
-`npm test` is offline. `npm run eval` is separate: it sends 21 canned prompts (add a column, sort, pivot, freeze panes, a prompt-injection cell, and so on) to the real Gemini API and checks which tools the model calls, so you can catch prompt or schema regressions. The workbook behind the tools is simulated, and arguments are checked with the real schemas.
+`npm test` is offline. `npm run eval` is separate: it sends 22 canned prompts (add a column, sort, pivot, freeze panes, a prompt-injection cell, and so on) to the real Gemini API and checks which tools the model calls, so you can catch prompt or schema regressions. The workbook behind the tools is simulated, and arguments are checked with the real schemas.
 
 ```bash
 GEMINI_API_KEY=your-key npm run eval
@@ -181,7 +181,8 @@ It uses a little of your API quota and skips itself when no key is set. Model ou
 - Formatting undo skips ranges over 5,000 cells and ignores borders
 - The model sees your selection summary, not the entire workbook, unless it reads ranges itself
 - Desktop Excel is the tested target; Excel on the web is untested
-- Ideas: conditional formatting, data cleaning helpers, multi-sheet awareness, other model providers
+- Multi-sheet: the model sees each sheet's name, used range and header row (up to 20 sheets) and can build cross-sheet formulas; the selection summary still covers only the active sheet
+- Ideas: other model providers
 
 ## Contributing
 

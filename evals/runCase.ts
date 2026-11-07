@@ -18,7 +18,7 @@ export interface CaseRun {
 
 /** The same context text the add-in sends for this sheet. */
 export const contextFor = (c: EvalCase): string =>
-  formatLiveContext(summarizeRange({ sheetName: c.sheet.name, address: c.sheet.address, values: c.sheet.values }));
+  formatLiveContext(summarizeRange({ sheetName: c.sheet.name, address: c.sheet.address, values: c.sheet.values }), c.workbook ?? null);
 
 /** Runs one case through the real agent loop against `model`, with a fake workbook behind the tools. */
 export const runCase = async (model: ModelClient, c: EvalCase): Promise<CaseRun> => {

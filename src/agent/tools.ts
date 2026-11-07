@@ -231,7 +231,7 @@ export const parseToolCall = (name: string, args: unknown): ParseResult => {
 };
 
 const descriptions: Record<ToolName, string> = {
-  get_workbook_info: "List all worksheets with their used range addresses. Call this first if you do not know the layout.",
+  get_workbook_info: "List all worksheets with their used range addresses and header row (up to 20 sheets). Call this first if you do not know the layout.",
   read_range:
     "Read cell values and formulas from a range. Use to inspect data before changing it. Returns up to maxRows rows (default 100). Rows hidden by a filter are skipped; the result reports how many.",
   write_cells:

@@ -1,5 +1,6 @@
 import { isReadOnlyTool } from "../src/agent/preview";
 import { toolDeclarations } from "../src/agent/tools";
+import type { SheetOverview } from "../src/excel/sheetOverview";
 import type { FakeSheet } from "./fakeExecutor";
 import { colOf, someCall, type Args, type Expectations } from "./score";
 
@@ -13,6 +14,8 @@ export interface EvalCase extends Expectations {
   readonly id: string;
   readonly prompt: string;
   readonly sheet: FakeSheet;
+  /** Other sheets in the workbook, shown to the model in the context like the add-in does. */
+  readonly workbook?: SheetOverview;
   /** What a good run looks like; the offline tests must score it as a pass. */
   readonly example: readonly ExampleCall[];
   /** A good run's closing message, for cases whose check reads the reply. */
@@ -287,6 +290,30 @@ export const CASES: readonly EvalCase[] = [
     example: [
       { name: "clean_data", args: { address: "A2:A4", operations: ["trim"] } },
       { name: "clean_data", args: { address: "B2:B4", operations: ["text_to_number"] } },
+    ],
+  },
+  {
+    id: "cross-sheet-lookup",
+    prompt: "Add a Unit Price column to this sheet that looks up each product's price from the Prices sheet",
+    sheet: SALES,
+    workbook: {
+      omittedSheets: 0,
+      sheets: [
+        { name: "Sheet1", usedRange: "Sheet1!A1:D6", headers: ["Region", "Product", "Qty", "Price"] },
+        { name: "Prices", usedRange: "Prices!A1:B4", headers: ["Product", "List Price"] },
+      ],
+    },
+    mustCall: ["write_cells"],
+    mustNotCall: ["clear_range", "add_sheet"],
+    check: (calls) =>
+      someCall(calls, "write_cells", (a) => list(a.data).flat().some((c) => /^=.*Prices!/i.test(text(c))))
+        ? null
+        : "expected a formula that references the Prices sheet",
+    example: [
+      {
+        name: "write_cells",
+        args: { address: "E1", data: [["Unit Price"], ["=VLOOKUP(B2,Prices!A:B,2,FALSE)"], ["=VLOOKUP(B3,Prices!A:B,2,FALSE)"], ["=VLOOKUP(B4,Prices!A:B,2,FALSE)"], ["=VLOOKUP(B5,Prices!A:B,2,FALSE)"], ["=VLOOKUP(B6,Prices!A:B,2,FALSE)"]] },
+      },
     ],
   },
 ];
