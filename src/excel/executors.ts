@@ -1,6 +1,7 @@
 import { parseToolCall, type ToolArgs, type ToolName } from "../agent/tools";
 import type { ToolExecutor, ToolResult } from "../agent/loop";
 import { splitSheetAddress } from "./address";
+import { cleanGrid, type CleanCell } from "./cleaning";
 import { toRuleFormula } from "./conditionalFormat";
 import { auditFormulas, MAX_FINDINGS_PER_KIND } from "./formulaAudit";
 import { canSnapshotFormats, FORMAT_PROPS_REQUEST, toRestoreProps, type CellFormat } from "./formatSnapshot";
@@ -12,6 +13,7 @@ import { loadRowHidden, MAX_SCAN_ROWS } from "./visibleRange";
 
 const DEFAULT_READ_ROWS = 100;
 const MAX_AUDIT_CELLS = 50000;
+const MAX_CLEAN_CELLS = 50000;
 const KINDS_ORDER = ["error_value", "inconsistent_formula", "hardcoded_in_formulas"] as const;
 
 // String literals (not Excel.AggregationFunction.*) so nothing touches the Excel global at import time.
@@ -485,6 +487,24 @@ const handlers: Handlers = {
       }),
     );
     return ok(`Added conditional format on ${fullAddress}: ${described}`);
+  },
+
+  async clean_data(ctx, { address, operations }, undo) {
+    const range = resolveRange(ctx, address);
+    range.load(["rowCount", "columnCount"]);
+    await ctx.sync();
+    if (range.rowCount * range.columnCount > MAX_CLEAN_CELLS) {
+      return { ok: false, error: `Range too large to clean (max ${MAX_CLEAN_CELLS} cells). Use a smaller range.` };
+    }
+    range.load(["address", "formulas"]);
+    await ctx.sync();
+    const result = cleanGrid(range.formulas as CleanCell[][], operations);
+    if (result.changed === 0) return ok(`Nothing to clean in ${range.address}`);
+    const where = await snapshotFormulas(ctx, range, undo);
+    range.formulas = result.values.map((row) => row.map((c) => c ?? "")) as (string | number | boolean)[][];
+    await ctx.sync();
+    const parts = operations.flatMap((op) => (result.perOperation[op] > 0 ? [`${op}: ${result.perOperation[op]}`] : []));
+    return ok(`Cleaned ${result.changed} cell(s) in ${where} (${parts.join(", ")})`);
   },
 
   async autofit_columns(ctx, { address }) {

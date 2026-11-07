@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CLEAN_OPERATIONS } from "../excel/cleaning";
 
 /** A1-style address, optionally sheet-qualified: A1, $A$1:B9, A:A, Sheet1!A1, 'My Sheet'!A1:C3 */
 const ADDRESS_PATTERN =
@@ -179,6 +180,15 @@ const schemas = {
         fail("colorScale needs minColor and maxColor (midColor optional).");
       }
     }),
+  clean_data: z
+    .object({
+      address,
+      operations: z.array(z.enum(CLEAN_OPERATIONS)).min(1).max(CLEAN_OPERATIONS.length),
+    })
+    .refine(
+      (a) => a.operations.filter((o) => o === "upper" || o === "lower" || o === "proper").length <= 1,
+      "Pick at most one of upper, lower, proper.",
+    ),
   create_pivot_table: z.object({
     sourceAddress: address,
     destinationAddress: address.optional(),
@@ -249,6 +259,8 @@ const descriptions: Record<ToolName, string> = {
     "Find and replace text in cell contents. address limits the search; omit it to search the whole active sheet. replace may be '' to delete the text. matchCase and matchEntireCell default to false. Returns how many cells changed. Undoable.",
   conditional_format:
     "Add a conditional formatting rule that highlights cells automatically. rule 'cellValue': operator (GreaterThan, LessThan, GreaterThanOrEqual, LessThanOrEqual, EqualTo, NotEqualTo, Between, NotBetween) with value1 (and value2 for Between/NotBetween) plus fillColor and/or fontColor. rule 'text': cells containing text, plus fillColor and/or fontColor. rule 'colorScale': minColor and maxColor (optional midColor) gradient. Colours are hex like #FFC7CE (light red fill) with #9C0006 (dark red font). Numbers or text only for values; start a value with '=' for a cell reference like =$F$1.",
+  clean_data:
+    "Tidy messy data in a range in place (formulas are never touched). operations: 'trim' (cut leading/trailing/double spaces and non-breaking spaces), 'strip_nonprinting' (remove control and zero-width characters), 'fill_down' (fill blank cells from the cell above in the same column), 'text_to_number' (turn text like '1,200', '$5', '(45)', '12%' into real numbers), 'upper', 'lower', 'proper' (case; pick at most one). Operations run in a fixed order whatever order you list them. Returns how many cells each operation changed. Undoable. Use remove_duplicates for duplicate rows and find_replace for custom text fixes.",
   create_pivot_table:
     "Create a PivotTable from a source range whose first row is headers (every header non-blank and unique). rows/columns/filters/values use header names exactly. If destinationAddress is omitted, a new worksheet is created. summarizeBy: sum|count|average|max|min. Read the source headers first if unsure of names. If the source has rows hidden by a filter, only the visible rows are used (via a copied snapshot sheet) unless visibleRowsOnly is false. The source may be a whole sheet or whole columns; only the used part is read.",
 };

@@ -244,3 +244,19 @@ describe("toolDeclarations", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 });
+
+describe("clean_data", () => {
+  it("accepts valid operations", () => {
+    expect(parseToolCall("clean_data", { address: "A2:A9", operations: ["trim", "text_to_number"] }).ok).toBe(true);
+  });
+
+  it("rejects empty or unknown operations", () => {
+    expect(parseToolCall("clean_data", { address: "A2:A9", operations: [] }).ok).toBe(false);
+    expect(parseToolCall("clean_data", { address: "A2:A9", operations: ["shred"] }).ok).toBe(false);
+  });
+
+  it("allows at most one case operation", () => {
+    expect(parseToolCall("clean_data", { address: "A2:A9", operations: ["upper", "lower"] }).ok).toBe(false);
+    expect(parseToolCall("clean_data", { address: "A2:A9", operations: ["trim", "proper"] }).ok).toBe(true);
+  });
+});
