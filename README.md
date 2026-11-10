@@ -1,5 +1,7 @@
 # Excel-Ai-Assistant
 
+[![CI](https://github.com/ifahimkhan/Excel-Ai-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/ifahimkhan/Excel-Ai-Assistant/actions/workflows/ci.yml)
+
 An open-source AI assistant that lives inside Excel. Type what you want in plain English and it edits your workbook: formulas, formatting, sorting, tables, charts and PivotTables.
 
 You bring your own [Gemini API key](https://aistudio.google.com/apikey) (or several: when one hits a quota limit, the next is used). There is no backend and no account.
@@ -224,7 +226,7 @@ It uses a little of your API quota and skips itself when no key is set. Model ou
 
 ## Contributing
 
-Issues and pull requests are welcome. Please run `npm run typecheck && npm test` before submitting, and add tests for any new pure logic.
+Issues and pull requests are welcome. Please run `npm run typecheck && npm test` before submitting, and add tests for any new pure logic. CI runs the typecheck, tests and build on every push and pull request. The tests mock Excel, so for changes to `src/excel/` or `src/ui/` please also run the [manual test checklist](docs/manual-test-checklist.md) in real Excel.
 
 ## License
 
