@@ -4,7 +4,17 @@ import { splitSheetAddress } from "./address";
 import { cleanGrid, type CleanCell } from "./cleaning";
 import { toRuleFormula } from "./conditionalFormat";
 import { auditFormulas, MAX_FINDINGS_PER_KIND } from "./formulaAudit";
-import { canSnapshotFormats, FORMAT_PROPS_REQUEST, toRestoreProps, type CellFormat } from "./formatSnapshot";
+import {
+  backgroundFormat,
+  canSnapshotFormats,
+  FORMAT_PROPS_REQUEST,
+  MAX_FORMAT_SNAPSHOT_CELLS,
+  planSnapshotBlocks,
+  snapshotMode,
+  toRestoreProps,
+  type BackgroundFormat,
+  type CellFormat,
+} from "./formatSnapshot";
 import { readSheetOverviewIn } from "./readSheets";
 import { cleanNote, localCell } from "./sourceNote";
 import { formatPlan } from "../agent/plan";
@@ -151,26 +161,131 @@ const attachSourceNote = async (ctx: Ctx, target: Excel.Range, raw: string | und
   }
 };
 
+interface FormatChunk {
+  readonly address: string;
+  readonly props: Excel.CellProperties[][];
+  readonly numberFormat: string[][];
+}
+
+/** Put a sample cell's formatting back on a whole range (works for whole columns and rows). */
+const applyBackground = (range: Excel.Range, bg: BackgroundFormat, numberFormat: string): void => {
+  range.format.fill.clear();
+  if (bg.fillColor) range.format.fill.color = bg.fillColor;
+  if (bg.bold !== undefined) range.format.font.bold = bg.bold;
+  if (bg.italic !== undefined) range.format.font.italic = bg.italic;
+  if (bg.fontColor) range.format.font.color = bg.fontColor;
+  if (bg.horizontalAlignment) range.format.horizontalAlignment = bg.horizontalAlignment as Excel.HorizontalAlignment;
+  if (bg.wrapText !== undefined) range.format.wrapText = bg.wrapText;
+  // Excel applies a single value to every cell in the range, which avoids building a huge grid.
+  range.numberFormat = numberFormat as unknown as string[][];
+};
+
+/** Snapshot one block of cells: their per-cell formatting and number formats. */
+const snapshotBlock = async (ctx: Ctx, block: Excel.Range): Promise<FormatChunk> => {
+  block.load(["address", "numberFormat"]);
+  const props = block.getCellProperties(FORMAT_PROPS_REQUEST as unknown as Excel.CellPropertiesLoadOptions);
+  await ctx.sync();
+  return {
+    address: block.address,
+    props: toRestoreProps(props.value as unknown as CellFormat[][]) as unknown as Excel.CellProperties[][],
+    numberFormat: block.numberFormat.map((row) => [...row]),
+  };
+};
+
+/**
+ * Large range (e.g. a whole column): snapshot only the cells that hold real formatting (the part inside the
+ * sheet's used range, in blocks) plus one sample cell outside it for the empty remainder.
+ * Returns the restore plan, or null when the used part is too large to remember.
+ */
+const snapshotLargeRange = async (
+  ctx: Ctx,
+  range: Excel.Range,
+): Promise<{ chunks: readonly FormatChunk[]; background: { fmt: BackgroundFormat; numberFormat: string } | null } | null> => {
+  const used = range.worksheet.getUsedRangeOrNullObject(false);
+  used.load("isNullObject");
+  await ctx.sync();
+
+  let inter: Excel.Range | null = null;
+  if (!used.isNullObject) {
+    const found = range.getIntersectionOrNullObject(used);
+    found.load(["isNullObject", "rowCount", "columnCount"]);
+    await ctx.sync();
+    if (!found.isNullObject) inter = found;
+  }
+
+  const usedCells = inter ? inter.rowCount * inter.columnCount : 0;
+  const mode = snapshotMode(Number.MAX_SAFE_INTEGER, usedCells);
+  if (mode === "too-large") return null;
+
+  const chunks: FormatChunk[] = [];
+  if (inter && mode === "tiled") {
+    const blocks = planSnapshotBlocks(inter.rowCount, inter.columnCount, MAX_FORMAT_SNAPSHOT_CELLS);
+    if (blocks.length === 0) return null;
+    for (const b of blocks) {
+      chunks.push(await snapshotBlock(ctx, inter.getCell(b.rowOffset, 0).getResizedRange(b.rows - 1, inter.columnCount - 1)));
+    }
+  }
+
+  // Background sample: a cell of the target that lies outside the used range.
+  const candidates = [range.getLastCell(), range.getCell(0, 0)];
+  const outside: Excel.Range[] = [];
+  if (used.isNullObject) outside.push(candidates[1] as Excel.Range);
+  else {
+    const hits = candidates.map((c) => c.getIntersectionOrNullObject(used));
+    hits.forEach((h) => h.load("isNullObject"));
+    await ctx.sync();
+    hits.forEach((h, i) => h.isNullObject && outside.push(candidates[i] as Excel.Range));
+  }
+  const probe = outside[0];
+  if (!probe) return { chunks, background: null };
+
+  probe.load("numberFormat");
+  const sample = probe.getCellProperties(FORMAT_PROPS_REQUEST as unknown as Excel.CellPropertiesLoadOptions);
+  await ctx.sync();
+  const cell = (sample.value as unknown as CellFormat[][])[0]?.[0] ?? {};
+  return { chunks, background: { fmt: backgroundFormat(cell), numberFormat: String(probe.numberFormat[0]?.[0] ?? "General") } };
+};
+
 /**
  * Remember cell formatting (font, fill, alignment, wrap, number format) so the command can be undone.
- * Returns false when it cannot (old Excel, or a range too large to snapshot cell by cell).
+ * Small ranges are snapshotted cell by cell; big ones (whole columns) by the used part plus a background sample.
+ * Returns false when it cannot (old Excel, or a range whose used part is too large).
  */
 const snapshotFormats = async (ctx: Ctx, range: Excel.Range, undo: UndoLog): Promise<boolean> => {
   if (!Office.context.requirements.isSetSupported("ExcelApi", "1.9")) return false;
-  range.load(["address", "rowCount", "columnCount", "numberFormat"]);
-  await ctx.sync();
-  if (!canSnapshotFormats(range.rowCount, range.columnCount)) return false;
-  const props = range.getCellProperties(FORMAT_PROPS_REQUEST as unknown as Excel.CellPropertiesLoadOptions);
+  range.load(["address", "rowCount", "columnCount"]);
   await ctx.sync();
   const fullAddress = range.address;
-  const saved = toRestoreProps(props.value as unknown as CellFormat[][]) as unknown as Excel.CellProperties[][];
-  const numberFormat = range.numberFormat.map((row) => [...row]);
+
+  if (canSnapshotFormats(range.rowCount, range.columnCount)) {
+    range.load("numberFormat");
+    const props = range.getCellProperties(FORMAT_PROPS_REQUEST as unknown as Excel.CellPropertiesLoadOptions);
+    await ctx.sync();
+    const saved = toRestoreProps(props.value as unknown as CellFormat[][]) as unknown as Excel.CellProperties[][];
+    const numberFormat = range.numberFormat.map((row) => [...row]);
+    undo.record(`restore formatting ${fullAddress}`, () =>
+      Excel.run(async (c) => {
+        const r = resolveRange(c, fullAddress);
+        r.format.fill.clear();
+        r.setCellProperties(saved);
+        r.numberFormat = numberFormat;
+        await c.sync();
+      }),
+    );
+    return true;
+  }
+
+  const plan = await snapshotLargeRange(ctx, range);
+  if (!plan) return false;
   undo.record(`restore formatting ${fullAddress}`, () =>
     Excel.run(async (c) => {
-      const r = resolveRange(c, fullAddress);
-      r.format.fill.clear();
-      r.setCellProperties(saved);
-      r.numberFormat = numberFormat;
+      if (plan.background) applyBackground(resolveRange(c, fullAddress), plan.background.fmt, plan.background.numberFormat);
+      for (const chunk of plan.chunks) {
+        const r = resolveRange(c, chunk.address);
+        r.format.fill.clear();
+        r.setCellProperties(chunk.props);
+        r.numberFormat = chunk.numberFormat;
+      }
       await c.sync();
     }),
   );

@@ -6,6 +6,30 @@ You bring your own [Gemini API key](https://aistudio.google.com/apikey) (or seve
 
 > **Status:** early and experimental. Core flows work, but not every Excel action has been tested on every Excel version. Use **Undo last** and keep a backup of important workbooks.
 
+## Why use this instead of other Excel AI assistants
+
+Most Excel AI add-ins are hosted services: you sign up, they run the model and the tool loop on their servers, and your cell data passes through them. This one is different by design.
+
+| | Excel-Ai-Assistant | Typical hosted AI assistant |
+|---|---|---|
+| **Your data path** | Browser to Google's Gemini API only. No server of ours, no telemetry | Through the vendor's servers, often with prompts and tool output logged for a period |
+| **Account and cost** | No account, no subscription. You pay only for your own Gemini usage, and a free-tier key works | Account required; usually a paid plan beyond a free tier |
+| **Key limits** | Add several keys; when one hits its quota the next is used automatically | One plan, one quota |
+| **Source** | Open source (MIT). Read, change, or self-host the pane | Closed |
+| **Trust in changes** | Each write is read back and checked (see below), errors are flagged, and every command can be undone | Often "trust the output" |
+| **Control** | Preview and approve before anything changes, a Stop button, and read-only review prompts | Varies |
+| **Transparency** | Shows exactly which ranges were sent to the AI after every request | Rarely shown |
+
+What that gives you in practice:
+
+- **Private by default.** Only a small selection summary and the ranges the model asks to read are sent, and only to Google. Spreadsheet text is treated as data, never as instructions.
+- **It checks its own work.** After writing it reads the cells back and warns about values Excel stored differently or that show errors, then audits a multi-step task once and lets the model fix real mistakes. Formulas get a cell note saying which cells they use.
+- **Safe to try.** Preview-then-apply, one-click **Undo last** (including large formatting changes, new sheets and cell notes), guarded PivotTable and chart creation, and coded errors that help the model recover instead of looping.
+- **Fits how you work.** Save a command as a template and reuse it on any workbook, import a CSV into a new sheet, click cell addresses in replies to jump to them, and continue long tasks with one button.
+- **Tested, not just demoed.** Hundreds of offline unit tests cover the logic, and an eval suite of 28 prompts catches prompt or schema regressions against the real model.
+
+Honest limits: it is early and experimental, runs in desktop Excel only, uses Gemini models only, and has no connectors to accounting, ERP or database systems. If you need those, a hosted product may suit you better.
+
 ## What it does
 
 Open the **AI Assistant** pane from the Home tab and type a command:
@@ -45,7 +69,7 @@ Checks and transparency:
 
 Also: a short per-workbook log of what the assistant changed (last 10 commands, kept in local browser storage and sent with each request as data) so follow-ups like "do the same for column D" work after a reload or a long chat, replies stream in as the model writes them, a context-size hint (about 4 characters per token, an estimate only) that warns when the chat gets large, a **Preview before applying** switch (reads still run; writes are queued and listed, then you click **Apply** or **Discard**; later reads do not see queued edits), selection-aware suggestion chips, **Retry last**, a **Copy** button on replies, chat history kept per workbook in local browser storage (display only; the model does not remember it after a reload), plain-English Excel error messages, a model picker limited to models that suit spreadsheet work (**Gemini 3.8 Flash** by default, plus 3.6 Flash and 3.1 Pro; image, speech, live and lite models are hidden), a **Stop** button, and **Undo last** for the previous command.
 
-**Undo covers** cell contents and formulas, cell notes added with a write, sorts, tables, charts, PivotTables and sheets created by Import CSV. formatting (font, fill, alignment, wrap, number format) for ranges up to 5,000 cells on Excel API 1.9+. Larger ranges, such as whole columns, are not restored; the step line says so.
+**Undo covers** cell contents and formulas, cell notes added with a write, sorts, tables, charts, PivotTables and sheets created by Import CSV; and formatting (font, fill, alignment, wrap, number format) on Excel API 1.9+. Big ranges such as whole columns are covered too: the cells that hold data (up to 50,000) are restored one by one, and the empty rest of the range is reset from a sample cell, so it is best effort when empty rows had mixed formatting. If the data part is larger than 50,000 cells the step line says it cannot be undone.
 
 ## How it works
 
