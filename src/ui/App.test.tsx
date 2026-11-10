@@ -62,6 +62,7 @@ describe("App", () => {
     await openMenu();
     expect(await screen.findByRole("menuitem", { name: "Manage API keys (1)" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Show selection summary" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Copy diagnostics" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Remove all API keys" })).toBeTruthy();
     expect(screen.queryByText("selection-stub")).toBeNull();
   });

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Dropdown, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger, Option, Text } from "@fluentui/react-components";
 import { browserKeyStore } from "../lib/keyStore";
+import { copyText } from "../lib/clipboard";
+import { buildDiagnostics } from "../lib/diagnostics";
 import { validateKeys, type ModelInfo } from "../agent/gemini";
 import { pickDefaultModel } from "../agent/models";
 import { ApiKeyGate } from "./ApiKeyGate";
@@ -11,6 +13,31 @@ interface Session {
   readonly apiKeys: readonly string[];
   readonly models: readonly ModelInfo[];
 }
+
+const APP_VERSION = "0.1.0";
+const API_SETS = ["1.9", "1.18"] as const;
+
+const collectDiagnostics = (modelId: string, keyCount: number): string => {
+  const office = typeof Office !== "undefined" ? Office : undefined;
+  const apiSets: Record<string, boolean> = {};
+  for (const v of API_SETS) {
+    try {
+      apiSets[v] = office?.context?.requirements?.isSetSupported("ExcelApi", v) ?? false;
+    } catch {
+      apiSets[v] = false;
+    }
+  }
+  return buildDiagnostics({
+    appVersion: APP_VERSION,
+    modelId,
+    keyCount,
+    host: office?.context?.host?.toString(),
+    platform: office?.context?.platform?.toString(),
+    apiSets,
+    userAgent: navigator.userAgent,
+    now: new Date(),
+  });
+};
 
 export const App = () => {
   const store = useMemo(() => browserKeyStore(), []);
@@ -97,6 +124,7 @@ export const App = () => {
               <MenuItem onClick={() => setShowSelection((v) => !v)}>
                 {showSelection ? "Hide selection summary" : "Show selection summary"}
               </MenuItem>
+              <MenuItem onClick={() => void copyText(collectDiagnostics(modelId, session.apiKeys.length))}>Copy diagnostics</MenuItem>
               <MenuItem
                 onClick={() => {
                   store.clear();
