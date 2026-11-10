@@ -330,7 +330,7 @@ ${formatReadLog(reads)}`,
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, minHeight: 0, flex: 1, overflow: "hidden" }}>
-      <div style={{ flex: "1 1 0", overflowY: "auto", display: "grid", gap: 6, alignContent: "start", minHeight: 60 }}>
+      <div data-testid="chat-scroll" style={{ flex: "1 1 0", overflowY: "auto", display: "grid", gap: 6, alignContent: "start", minHeight: 60 }}>
         {lines.length === 0 && (
           <div style={{ display: "grid", gap: 6 }}>
             <Text size={200}>Tell me what to do with your sheet. Try:</Text>
@@ -400,7 +400,7 @@ ${formatReadLog(reads)}`,
         <div ref={bottomRef} />
       </div>
 
-      <div style={{ display: "grid", gap: 6, flexShrink: 0 }}>
+      <div data-testid="chat-footer" style={{ display: "grid", gap: 6, flexShrink: 0 }}>
       {running && (
         <div
           role="status"

@@ -16,5 +16,10 @@ const https =
 export default defineConfig({
   plugins: [react()],
   server: { port: 3100, strictPort: true, https },
-  test: { environment: "node", include: ["src/**/*.test.ts", "evals/**/*.test.ts"] },
+  test: {
+    environment: "node",
+    // UI tests opt into jsdom with a "@vitest-environment jsdom" comment at the top of the file.
+    include: ["src/**/*.test.{ts,tsx}", "evals/**/*.test.ts"],
+    setupFiles: ["src/ui/testSetup.ts"],
+  },
 });

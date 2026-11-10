@@ -177,7 +177,7 @@ Then copy `manifest.prod.xml`, replace every `https://excel-ai-assistant-ivory.v
 |---|---|
 | `npm run dev` | Vite dev server (HTTPS, port 3100) |
 | `npm run build` | Typecheck and production build |
-| `npm test` | Run unit tests |
+| `npm test` | Run unit and UI component tests (offline) |
 | `npm run typecheck` | TypeScript check only |
 | `npm run certs` | Install the localhost dev certificate |
 | `npm run sideload` / `npm run stop` | Load / unload the add-in in desktop Excel |
