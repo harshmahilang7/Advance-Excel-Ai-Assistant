@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SheetSummary } from "./context";
-import { DEFAULT_SUGGESTIONS, suggestPrompts } from "./suggestions";
+import { DEFAULT_SUGGESTIONS, REVIEW_SUGGESTIONS, suggestPrompts } from "./suggestions";
 
 const summary = (over: Partial<SheetSummary> = {}): SheetSummary => ({
   hiddenRowCount: 0,
@@ -45,3 +45,15 @@ describe("suggestPrompts", () => {
     expect(JSON.stringify(input)).toBe(frozen);
   });
 });
+
+describe("REVIEW_SUGGESTIONS", () => {
+  it("has a few distinct prompts", () => {
+    expect(REVIEW_SUGGESTIONS.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(REVIEW_SUGGESTIONS).size).toBe(REVIEW_SUGGESTIONS.length);
+  });
+
+  it("every prompt tells the model not to change anything", () => {
+    for (const prompt of REVIEW_SUGGESTIONS) expect(prompt).toMatch(/do not change/i);
+  });
+});
+

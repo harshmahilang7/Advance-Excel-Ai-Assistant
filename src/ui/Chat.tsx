@@ -20,7 +20,7 @@ import { copyText } from "../lib/clipboard";
 import { friendlyError } from "../lib/friendlyError";
 import { summarizeRange } from "../excel/context";
 import { isExcelHost, readSelection } from "../excel/readSelection";
-import { DEFAULT_SUGGESTIONS, suggestPrompts } from "../excel/suggestions";
+import { DEFAULT_SUGGESTIONS, REVIEW_SUGGESTIONS, suggestPrompts } from "../excel/suggestions";
 import { createUndoLog } from "../excel/undo";
 
 type NewLine = Line extends infer L ? (L extends Line ? Omit<L, "id"> : never) : never;
@@ -268,6 +268,12 @@ ${formatReadLog(reads)}`,
             <Text size={200}>Tell me what to do with your sheet. Try:</Text>
             {suggestions.map((ex) => (
               <Button key={ex} size="small" appearance="outline" style={{ justifyContent: "flex-start", textAlign: "left", height: "auto", padding: "4px 8px" }} onClick={() => setInput(ex)}>
+                {ex}
+              </Button>
+            ))}
+            <Text size={200} style={{ marginTop: 4 }}>Or check your sheet without changing it:</Text>
+            {REVIEW_SUGGESTIONS.map((ex) => (
+              <Button key={ex} size="small" appearance="subtle" style={{ justifyContent: "flex-start", textAlign: "left", height: "auto", padding: "4px 8px" }} onClick={() => setInput(ex)}>
                 {ex}
               </Button>
             ))}

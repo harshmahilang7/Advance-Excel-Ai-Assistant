@@ -7,6 +7,13 @@ export const DEFAULT_SUGGESTIONS: readonly string[] = [
   "Make a column chart from my selection",
 ];
 
+/** Read-only prompts: the model may look and explain but must not change the workbook. */
+export const REVIEW_SUGGESTIONS: readonly string[] = [
+  "Audit this sheet for inconsistent formulas and hardcoded numbers. Do not change anything; rank the issues by impact.",
+  "Find the largest or most unusual values in my selection and explain them. Do not change the workbook.",
+  "Look at this workbook and suggest the next tasks worth automating. Do not change anything.",
+];
+
 const MAX_SUGGESTIONS = 5;
 
 /** Selection-aware starter prompts built from real header names. Pure. */

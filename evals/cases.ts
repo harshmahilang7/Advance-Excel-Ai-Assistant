@@ -2,6 +2,7 @@ import { isReadOnlyTool } from "../src/agent/preview";
 import { toolDeclarations } from "../src/agent/tools";
 import type { SheetOverview } from "../src/excel/sheetOverview";
 import type { FakeSheet } from "./fakeExecutor";
+import { REVIEW_SUGGESTIONS } from "../src/excel/suggestions";
 import { colOf, someCall, type Args, type Expectations } from "./score";
 
 /** A tool call an ideal model would make. Used offline to prove each case is satisfiable. */
@@ -366,5 +367,21 @@ export const CASES: readonly EvalCase[] = [
     check: (_calls, reply) => (/`(?:[A-Za-z0-9 ']+!)?\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?`/.test(reply) ? null : "expected the reply to give cell addresses in backticks"),
     example: [{ name: "write_cells", args: { address: "E1", data: [["Total"], ["=C2*D2"], ["=C3*D3"], ["=C4*D4"], ["=C5*D5"], ["=C6*D6"]] } }],
     exampleReply: "Added a Total column in `E1:E6`, multiplying Qty by Price.",
+  },
+  {
+    id: "review-audit-no-changes",
+    prompt: REVIEW_SUGGESTIONS[0] ?? "",
+    sheet: SALES_WITH_TOTAL,
+    mustCall: ["audit_formulas"],
+    mustNotCall: WRITE_TOOLS,
+    example: [{ name: "audit_formulas", args: {} }],
+  },
+  {
+    id: "review-unusual-no-changes",
+    prompt: REVIEW_SUGGESTIONS[1] ?? "",
+    sheet: SALES,
+    mustCall: ["read_range"],
+    mustNotCall: WRITE_TOOLS,
+    example: [{ name: "read_range", args: { address: "A1:D6" } }],
   },
 ];

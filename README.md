@@ -2,7 +2,7 @@
 
 An open-source AI assistant that lives inside Excel. Type what you want in plain English and it edits your workbook: formulas, formatting, sorting, tables, charts and PivotTables.
 
-You bring your own [Gemini API key](https://aistudio.google.com/apikey). There is no backend and no account.
+You bring your own [Gemini API key](https://aistudio.google.com/apikey) (or several: when one hits a quota limit, the next is used). There is no backend and no account.
 
 > **Status:** early and experimental. Core flows work, but not every Excel action has been tested on every Excel version. Use **Undo last** and keep a backup of important workbooks.
 
@@ -27,7 +27,18 @@ The model reads your selection, calls tools, and the add-in applies them to the 
 | Format | `format_range` (bold, italic, colours, number format, alignment, wrap), `conditional_format` (cell value, text, colour scale), `autofit_columns` |
 | Data | `sort_range`, `create_table`, `find_replace`, `clean_data` (trim, strip hidden characters, fill blanks down, text to numbers, change case), `remove_duplicates`, `filter_range`, `data_validation` (dropdowns, number and text-length limits) |
 | Sheets | `add_sheet`, `rename_sheet`, `freeze_panes` |
+| Planning | `propose_plan` (the model lists its steps first when a request needs three or more changes; changes nothing) |
 | Visuals | `create_chart`, `create_pivot_table` |
+
+Checks and transparency:
+
+- **Read-back check.** After `write_cells`, the cells are read back. The step line says "verified" or warns about cells Excel stored differently (for example a date typed as text) or that show an error value (`#REF!`, `#DIV/0!`...). `null` in the data leaves a cell unchanged; use an empty string to blank it.
+- **Cell notes.** When the model writes formulas it can attach a note on the top-left cell saying which cells they use (needs Excel API 1.18; skipped gracefully on older Excel, and undone with the command).
+- **What was sent.** After each request the pane lists the ranges the model read, plus a "Worked for 12s · 5 steps · 3 changes" line.
+- **Clickable addresses.** Cell addresses the model writes in backticks in its reply are links that select that range in Excel.
+- **Safer pivots and charts.** A PivotTable is refused if its destination sits inside its own source or on existing data, and a chart is refused on an empty range. Tool errors carry a code and a "Try:" hint (`DESTINATION_OCCUPIED: ... Try: ...`) so the model can recover.
+- **Continue.** If a long task stops at the step limit, a **Continue** button resumes it.
+- **Review without changing.** Starter chips such as "Audit this sheet..." tell the model not to change anything.
 
 Also: a short per-workbook log of what the assistant changed (last 10 commands, kept in local browser storage and sent with each request as data) so follow-ups like "do the same for column D" work after a reload or a long chat, replies stream in as the model writes them, a context-size hint (about 4 characters per token, an estimate only) that warns when the chat gets large, a **Preview changes before applying** switch (reads still run; writes are queued and listed, then you click **Apply** or **Discard**; later reads do not see queued edits), selection-aware suggestion chips, **Retry last**, a **Copy** button on replies, chat history kept per workbook in local browser storage (display only; the model does not remember it after a reload), plain-English Excel error messages, a model picker limited to models that suit spreadsheet work (**Gemini 3.8 Flash** by default, plus 3.6 Flash and 3.1 Pro; image, speech, live and lite models are hidden), a **Stop** button, and **Undo last** for the previous command.
 
@@ -60,7 +71,7 @@ Design choices:
 
 ## Privacy
 
-- Your Gemini key is stored in this add-in's browser storage on your computer only, and sent only to Google's Gemini API.
+- Your Gemini keys are stored in this add-in's browser storage on your computer only, and sent only to Google's Gemini API. Manage or remove them from the **⋯** menu.
 - When you send a command, the selection summary and any ranges the model reads are sent to Google for processing. Do not use it with data you are not allowed to share with Google.
 - No telemetry, no server of ours.
 
@@ -159,7 +170,7 @@ public/assets/icon.svg  Source icon; `npm run icons` renders the PNG sizes
 
 ## Evals
 
-`npm test` is offline. `npm run eval` is separate: it sends 26 canned prompts (add a column, sort, pivot, freeze panes, a prompt-injection cell, and so on) to the real Gemini API and checks which tools the model calls, so you can catch prompt or schema regressions. The workbook behind the tools is simulated, and arguments are checked with the real schemas.
+`npm test` is offline. `npm run eval` is separate: it sends 28 canned prompts (add a column, sort, pivot, freeze panes, a prompt-injection cell, and so on) to the real Gemini API and checks which tools the model calls, so you can catch prompt or schema regressions. The workbook behind the tools is simulated, and arguments are checked with the real schemas.
 
 ```bash
 GEMINI_API_KEY=your-key npm run eval
