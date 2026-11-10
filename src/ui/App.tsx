@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Dropdown, Option, Text } from "@fluentui/react-components";
 import { browserKeyStore } from "../lib/keyStore";
-import { isInvalidKeyError, listChatModels, type ModelInfo } from "../agent/gemini";
+import { validateKeys, type ModelInfo } from "../agent/gemini";
 import { pickDefaultModel } from "../agent/models";
 import { ApiKeyGate } from "./ApiKeyGate";
 import { Chat } from "./Chat";
 import { SelectionPanel } from "./SelectionPanel";
 
 interface Session {
-  readonly apiKey: string;
+  readonly apiKeys: readonly string[];
   readonly models: readonly ModelInfo[];
 }
 
@@ -16,22 +16,27 @@ export const App = () => {
   const store = useMemo(() => browserKeyStore(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [modelId, setModelId] = useState<string>("");
-  const [restoring, setRestoring] = useState(() => store.get() !== null);
+  const [editing, setEditing] = useState(false);
+  const [restoring, setRestoring] = useState(() => store.list().length > 0);
 
-  const start = (apiKey: string, models: readonly ModelInfo[]) => {
-    setSession({ apiKey, models });
+  const start = (apiKeys: readonly string[], models: readonly ModelInfo[]) => {
+    setSession({ apiKeys, models });
     setModelId(pickDefaultModel(models));
+    setEditing(false);
   };
 
-  // Restore a previously saved key, re-validating it once on startup.
+  // Restore previously saved keys, re-validating them once on startup.
   useEffect(() => {
-    const saved = store.get();
-    if (!saved) return;
+    const saved = store.list();
+    if (saved.length === 0) return;
     let cancelled = false;
-    listChatModels(saved)
-      .then((models) => !cancelled && start(saved, models))
-      // Forget the saved key only when Google says it is bad, not on a network blip or rate limit.
-      .catch((err: unknown) => isInvalidKeyError(err) && store.clear())
+    validateKeys(saved)
+      .then(({ keep, rejected, models }) => {
+        // Forget only keys Google says are bad, not ones that hit a network blip or rate limit.
+        if (rejected.length > 0) store.save(keep);
+        if (!cancelled) start(keep, models);
+      })
+      .catch(() => undefined)
       .finally(() => !cancelled && setRestoring(false));
     return () => {
       cancelled = true;
@@ -46,7 +51,11 @@ export const App = () => {
     );
   }
 
-  if (!session) return <ApiKeyGate saveKey={store.set} onReady={start} />;
+  if (!session || editing) {
+    return (
+      <ApiKeyGate initialKeys={session?.apiKeys ?? store.list()} saveKeys={store.save} onReady={start} />
+    );
+  }
 
   return (
     <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, height: "100vh", boxSizing: "border-box" }}>
@@ -67,7 +76,7 @@ export const App = () => {
         </Dropdown>
       </div>
 
-      <Chat key={`${session.apiKey}:${modelId}`} apiKey={session.apiKey} modelId={modelId} />
+      <Chat key={`${session.apiKeys.join("|")}:${modelId}`} apiKeys={session.apiKeys} modelId={modelId} />
 
       <details>
         <summary style={{ cursor: "pointer", fontSize: 12 }}>Debug: selection summary</summary>
@@ -76,12 +85,19 @@ export const App = () => {
       <Button
         size="small"
         appearance="subtle"
+        onClick={() => setEditing(true)}
+      >
+        Manage API keys ({session.apiKeys.length})
+      </Button>
+      <Button
+        size="small"
+        appearance="subtle"
         onClick={() => {
           store.clear();
           setSession(null);
         }}
       >
-        Remove API key
+        Remove all API keys
       </Button>
     </div>
   );

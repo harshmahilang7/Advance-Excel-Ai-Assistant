@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import type { FailureKind } from "./keyPool";
 import { selectExcelModels, type ModelInfo } from "./models";
 
 export type { ModelInfo } from "./models";
@@ -20,6 +21,41 @@ export const describeGeminiError = (err: unknown): string => {
 export const isInvalidKeyError = (err: unknown): boolean => {
   const message = err instanceof Error ? err.message : String(err);
   return /API key not valid|API_KEY_INVALID|\b403\b|PERMISSION_DENIED|not valid/i.test(message);
+};
+
+/** True when an error means this key hit a rate limit or quota (another key may still work). */
+export const isQuotaError = (err: unknown): boolean => {
+  const message = err instanceof Error ? err.message : String(err);
+  return /\b429\b|RESOURCE_EXHAUSTED|rate limit|quota/i.test(message);
+};
+
+export const classifyGeminiError = (err: unknown): FailureKind => {
+  if (isInvalidKeyError(err)) return "invalid";
+  if (isQuotaError(err)) return "quota";
+  return "other";
+};
+
+export interface ValidatedKeys {
+  /** Every key that is not definitively invalid (rate-limited keys are kept). */
+  readonly keep: readonly string[];
+  readonly rejected: readonly string[];
+  readonly models: readonly ModelInfo[];
+}
+
+/** Checks all keys in parallel. Throws only if no key could list models. */
+export const validateKeys = async (keys: readonly string[]): Promise<ValidatedKeys> => {
+  const results = await Promise.allSettled(keys.map((k) => listChatModels(k)));
+  const rejected = keys.filter((_, i) => {
+    const r = results[i];
+    return r?.status === "rejected" && isInvalidKeyError(r.reason);
+  });
+  const keep = keys.filter((k) => !rejected.includes(k));
+  const firstOk = results.find((r): r is PromiseFulfilledResult<readonly ModelInfo[]> => r.status === "fulfilled");
+  if (!firstOk) {
+    const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    throw failure?.reason instanceof Error ? failure.reason : new Error("Could not validate the API keys.");
+  }
+  return { keep, rejected, models: firstOk.value };
 };
 
 /**

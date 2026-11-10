@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createKeyStore, type KeyStorage } from "./keyStore";
+import { createKeyStore, parseKeys, type KeyStorage } from "./keyStore";
 
 const memoryStorage = (): KeyStorage => {
   const data = new Map<string, string>();
@@ -11,27 +11,44 @@ const memoryStorage = (): KeyStorage => {
 };
 
 describe("keyStore", () => {
-  it("returns null when no key saved", () => {
-    expect(createKeyStore(memoryStorage()).get()).toBeNull();
+  it("returns an empty list when nothing saved", () => {
+    expect(createKeyStore(memoryStorage()).list()).toEqual([]);
   });
 
-  it("saves and reads a trimmed key", () => {
+  it("saves and reads trimmed, de-duplicated keys in order", () => {
     const store = createKeyStore(memoryStorage());
-    store.set("  AIzaTestKey123  ");
-    expect(store.get()).toBe("AIzaTestKey123");
+    store.save(["  AIzaOne  ", "AIzaTwo", "AIzaOne"]);
+    expect(store.list()).toEqual(["AIzaOne", "AIzaTwo"]);
   });
 
-  it("rejects empty or whitespace-only keys", () => {
+  it("rejects an empty set of keys", () => {
     const store = createKeyStore(memoryStorage());
-    expect(() => store.set("   ")).toThrow(/empty/i);
-    expect(store.get()).toBeNull();
+    expect(() => store.save(["   "])).toThrow(/empty/i);
+    expect(() => store.save([])).toThrow(/empty/i);
+    expect(store.list()).toEqual([]);
   });
 
-  it("clears the key", () => {
+  it("clears all keys", () => {
     const store = createKeyStore(memoryStorage());
-    store.set("abc");
+    store.save(["abc", "def"]);
     store.clear();
-    expect(store.get()).toBeNull();
+    expect(store.list()).toEqual([]);
+  });
+
+  it("migrates the legacy single key", () => {
+    const storage = memoryStorage();
+    storage.setItem("griddy.geminiApiKey", "legacyKey");
+    const store = createKeyStore(storage);
+    expect(store.list()).toEqual(["legacyKey"]);
+    store.save(["legacyKey", "newKey"]);
+    expect(storage.getItem("griddy.geminiApiKey")).toBeNull();
+    expect(store.list()).toEqual(["legacyKey", "newKey"]);
+  });
+
+  it("ignores corrupt stored data", () => {
+    const storage = memoryStorage();
+    storage.setItem("griddy.geminiApiKeys", "{not json");
+    expect(createKeyStore(storage).list()).toEqual([]);
   });
 
   it("survives a storage that throws (private mode / blocked)", () => {
@@ -47,7 +64,13 @@ describe("keyStore", () => {
       },
     };
     const store = createKeyStore(broken);
-    expect(store.get()).toBeNull();
-    expect(() => store.set("abc")).toThrow(/could not save/i);
+    expect(store.list()).toEqual([]);
+    expect(() => store.save(["abc"])).toThrow(/could not save/i);
+  });
+});
+
+describe("parseKeys", () => {
+  it("splits on newlines, commas and spaces and drops blanks and duplicates", () => {
+    expect(parseKeys("a\n b ,c;\n\n a")).toEqual(["a", "b", "c"]);
   });
 });

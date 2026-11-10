@@ -1,4 +1,5 @@
-const STORAGE_KEY = "griddy.geminiApiKey";
+const STORAGE_KEY = "griddy.geminiApiKeys";
+const LEGACY_STORAGE_KEY = "griddy.geminiApiKey";
 
 export interface KeyStorage {
   getItem(key: string): string | null;
@@ -7,36 +8,52 @@ export interface KeyStorage {
 }
 
 export interface KeyStore {
-  get(): string | null;
-  set(key: string): void;
+  list(): readonly string[];
+  save(keys: readonly string[]): void;
   clear(): void;
 }
 
+/** Splits pasted text (one per line, or comma/space separated) into trimmed, de-duplicated keys. */
+export const parseKeys = (text: string): readonly string[] => [
+  ...new Set(text.split(/[\s,;]+/).map((k) => k.trim()).filter((k) => k.length > 0)),
+];
+
+const readList = (storage: KeyStorage): readonly string[] => {
+  const raw = storage.getItem(STORAGE_KEY);
+  if (raw) {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter((k): k is string => typeof k === "string" && k.length > 0);
+  }
+  const legacy = storage.getItem(LEGACY_STORAGE_KEY);
+  return legacy ? [legacy] : [];
+};
+
 /**
- * Stores the user's own Gemini key in local browser storage only.
- * The key never leaves this machine except in requests to Google.
+ * Stores the user's own Gemini keys in local browser storage only.
+ * Keys never leave this machine except in requests to Google.
  */
 export const createKeyStore = (storage: KeyStorage): KeyStore => ({
-  get() {
+  list() {
     try {
-      const value = storage.getItem(STORAGE_KEY);
-      return value && value.length > 0 ? value : null;
+      return readList(storage);
     } catch {
-      return null;
+      return [];
     }
   },
-  set(key) {
-    const trimmed = key.trim();
-    if (trimmed.length === 0) throw new Error("API key is empty.");
+  save(keys) {
+    const cleaned = parseKeys(keys.join("\n"));
+    if (cleaned.length === 0) throw new Error("API key is empty.");
     try {
-      storage.setItem(STORAGE_KEY, trimmed);
+      storage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+      storage.removeItem(LEGACY_STORAGE_KEY);
     } catch {
-      throw new Error("Could not save the API key: browser storage is unavailable.");
+      throw new Error("Could not save the API keys: browser storage is unavailable.");
     }
   },
   clear() {
     try {
       storage.removeItem(STORAGE_KEY);
+      storage.removeItem(LEGACY_STORAGE_KEY);
     } catch {
       /* nothing stored we can remove; treat as cleared */
     }

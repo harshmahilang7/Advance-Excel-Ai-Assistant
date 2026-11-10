@@ -22,7 +22,7 @@ import { createUndoLog } from "../excel/undo";
 type NewLine = Line extends infer L ? (L extends Line ? Omit<L, "id"> : never) : never;
 
 interface Props {
-  readonly apiKey: string;
+  readonly apiKeys: readonly string[];
   readonly modelId: string;
 }
 
@@ -50,7 +50,7 @@ const workbookKeyOf =(): string => {
   }
 };
 
-export const Chat = ({ apiKey, modelId }: Props) => {
+export const Chat = ({ apiKeys, modelId }: Props) => {
   const chatStore = useMemo(() => browserChatStore(), []);
   const workbookKey = useMemo(workbookKeyOf, []);
   const [lines, setLines] = useState<readonly Line[]>(() => chatStore.load(workbookKey));
@@ -77,8 +77,8 @@ export const Chat = ({ apiKey, modelId }: Props) => {
   const undo = useMemo(() => createUndoLog(), []);
   const execute = useMemo(() => createExcelExecutor(undo), [undo]);
   const model = useMemo(
-    () => createGeminiClient({ apiKey, model: modelId, systemInstruction: SYSTEM_PROMPT }),
-    [apiKey, modelId],
+    () => createGeminiClient({ apiKeys, model: modelId, systemInstruction: SYSTEM_PROMPT }),
+    [apiKeys, modelId],
   );
 
   useEffect(() => {

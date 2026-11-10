@@ -31,7 +31,7 @@ const describeRun = (r: CaseRun): string => {
 
 describe.skipIf(!apiKey)("live eval", () => {
   it(`meets the pass-rate bar (${minPass}) on ${modelId}`, async () => {
-    const model = createGeminiClient({ apiKey: apiKey as string, model: modelId, systemInstruction: SYSTEM_PROMPT });
+    const model = createGeminiClient({ apiKeys: [apiKey as string], model: modelId, systemInstruction: SYSTEM_PROMPT });
     const selected = CASES.filter((c) => only.size === 0 || only.has(c.id));
     expect(selected.length, "EVAL_ONLY matched no cases").toBeGreaterThan(0);
 
