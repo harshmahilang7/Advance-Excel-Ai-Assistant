@@ -8,6 +8,7 @@ import { importTable } from "../excel/importTable";
 import { parseDelimited } from "../lib/csv";
 import { addTemplate, browserTemplateStore, removeTemplate, type Template } from "../lib/templateStore";
 import { formatRunSummary } from "../lib/runSummary";
+import { addTouched, EMPTY_TOUCHED, formatChanged, totalCells, type TouchedState } from "../lib/touched";
 import { addRead, describeRead, formatReadLog } from "../agent/readLog";
 import { browserChangeLogStore } from "../lib/changeLogStore";
 import { createGeminiClient } from "../agent/geminiClient";
@@ -175,13 +176,17 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
       let steps: readonly string[] = [];
       let reads: readonly string[] = [];
       let changes = 0;
+      let touched: TouchedState = EMPTY_TOUCHED;
       const startedAt = Date.now();
       const collect = (e: AgentEvent) => {
         onEvent(e);
         if (e.type === "tool" && e.ok) {
           const read = describeRead(e.name, e.args);
           if (read) reads = addRead(reads, read);
-          if (!isReadOnlyTool(e.name)) changes += 1;
+          if (!isReadOnlyTool(e.name)) {
+            changes += 1;
+            if (!previewMode) touched = addTouched(touched, e.touched);
+          }
         }
         // Only real, successful writes count. In preview mode nothing ran, so nothing is recorded here.
         if (!previewMode && e.type === "tool" && e.ok && !isReadOnlyTool(e.name)) steps = [...steps, e.summary];
@@ -209,9 +214,11 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
         historyRef.current = trimHistory(result.history, KEEP_USER_TURNS);
         push({
           kind: "note",
-          text: `${formatRunSummary({ ms: Date.now() - startedAt, toolCalls: result.toolCalls, changes, queued: previewMode })}
+          text: `${formatRunSummary({ ms: Date.now() - startedAt, toolCalls: result.toolCalls, changes, queued: previewMode, cells: totalCells(touched) })}
 ${formatReadLog(reads)}`,
         });
+        const changed = formatChanged(touched);
+        if (changed) push({ kind: "note", text: changed });
         if (result.aborted) push({ kind: "note", text: "Stopped." });
         else if (result.hitStepLimit) {
           push({ kind: "note", text: "Stopped after the step limit. Click Continue to keep going." });
@@ -364,7 +371,7 @@ ${formatReadLog(reads)}`,
         )}
         {lines.map((l) => (
           <div key={l.id} style={{ background: colorFor(l), borderRadius: 6, padding: "6px 8px", fontSize: 13, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-            {l.kind === "assistant" ? <ReplyText text={l.text} /> : l.text}
+            {l.kind === "assistant" || l.kind === "note" ? <ReplyText text={l.text} /> : l.text}
             {(l.kind === "assistant" || l.kind === "error") && (
               <div style={{ textAlign: "right" }}>
                 <Button

@@ -110,6 +110,18 @@ describe("Chat sending", () => {
     expect(state.execute).toHaveBeenCalledWith("write_cells", expect.objectContaining({ address: "E1" }));
   });
 
+  it("shows the cell count and clickable changed ranges when writes report them", async () => {
+    state.execute.mockResolvedValue({ ...okTool, touched: { address: "Sheet1!E1:E6", cells: 6 } });
+    writeThenReply("Done.");
+    renderChat();
+    type("add a total");
+    send();
+
+    expect(await screen.findByRole("button", { name: "Sheet1!E1:E6" })).toBeTruthy();
+    const note = await screen.findByText(/Worked for/);
+    expect(note.textContent).toMatch(/1 change · 6 cells/);
+  });
+
   it("lists the ranges the model read in the read log", async () => {
     let turn = 0;
     state.generate.mockImplementation(async (): Promise<ModelTurn> => {

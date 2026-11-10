@@ -1,5 +1,5 @@
 import { parseToolCall, type ToolArgs, type ToolName } from "../agent/tools";
-import type { ToolExecutor, ToolResult } from "../agent/loop";
+import type { ToolExecutor, ToolResult, Touched } from "../agent/loop";
 import { splitSheetAddress } from "./address";
 import { cleanGrid, type CleanCell } from "./cleaning";
 import { toRuleFormula } from "./conditionalFormat";
@@ -59,7 +59,8 @@ const resolveRange = (ctx: Ctx, address: string): Excel.Range => {
   return ws.getRange(cells);
 };
 
-const ok = (summary: string, data: unknown = null): ToolResult => ({ ok: true, summary, data });
+const ok = (summary: string, data: unknown = null, touched?: Touched): ToolResult =>
+  touched ? { ok: true, summary, data, touched } : { ok: true, summary, data };
 
 /** Remember the current formulas of a range so the command can be undone. */
 const snapshotFormulas = async (ctx: Ctx, range: Excel.Range, undo: UndoLog): Promise<string> => {
@@ -353,7 +354,7 @@ const handlers: Handlers = {
     await ctx.sync();
     const verified = await verifyWritten(ctx, target, data);
     const noteStatus = await attachSourceNote(ctx, target, note, undo);
-    return ok(`Wrote ${rows}x${cols} cells at ${where}${verified}${noteStatus}`);
+    return ok(`Wrote ${rows}x${cols} cells at ${where}${verified}${noteStatus}`, null, { address: where, cells: rows * cols });
   },
 
   async format_range(ctx, a, undo) {
@@ -371,7 +372,7 @@ const handlers: Handlers = {
       range.numberFormat = Array.from({ length: range.rowCount }, () => Array(range.columnCount).fill(a.numberFormat));
     }
     await ctx.sync();
-    return ok(`Formatted ${range.address}${undoable ? "" : NOT_UNDOABLE}`);
+    return ok(`Formatted ${range.address}${undoable ? "" : NOT_UNDOABLE}`, null, { address: range.address, cells: range.rowCount * range.columnCount });
   },
 
   async sort_range(ctx, { address, columnIndex, ascending, hasHeaders }, undo) {
@@ -684,7 +685,7 @@ const handlers: Handlers = {
     const copyType = { all: Excel.RangeCopyType.all, values: Excel.RangeCopyType.values, formats: Excel.RangeCopyType.formats }[what];
     dest.copyFrom(src, copyType);
     await ctx.sync();
-    return ok(`Copied ${what} of ${src.address} to ${dest.address}${undoable ? "" : NOT_UNDOABLE}`);
+    return ok(`Copied ${what} of ${src.address} to ${dest.address}${undoable ? "" : NOT_UNDOABLE}`, null, { address: dest.address, cells: src.rowCount * src.columnCount });
   },
 
   async merge_cells(ctx, { address, across, discardOthers }, undo) {

@@ -34,13 +34,19 @@ export interface ModelClient {
 export type StreamEvent = { readonly type: "delta"; readonly text: string } | { readonly type: "end" };
 
 export type ToolResult =
-  | { readonly ok: true; readonly summary: string; readonly data: unknown }
+  | { readonly ok: true; readonly summary: string; readonly data: unknown; readonly touched?: Touched }
   | { readonly ok: false; readonly error: string };
 
 export type ToolExecutor = (name: string, args: unknown) => Promise<ToolResult>;
 
+/** The range a write changed and how many cells it covers. */
+export interface Touched {
+  readonly address: string;
+  readonly cells: number;
+}
+
 export type AgentEvent =
-  | { readonly type: "tool"; readonly name: string; readonly args: unknown; readonly ok: boolean; readonly summary: string }
+  | { readonly type: "tool"; readonly name: string; readonly args: unknown; readonly ok: boolean; readonly summary: string; readonly touched?: Touched }
   | { readonly type: "text"; readonly text: string };
 
 export interface AgentRun {
@@ -156,6 +162,7 @@ export const runAgent = async (run: AgentRun): Promise<AgentResult> => {
         args: call.args,
         ok: result.ok,
         summary: result.ok ? result.summary : result.error,
+        ...(result.ok && result.touched ? { touched: result.touched } : {}),
       });
     }
     history = [...history, { role: "tool", results }];

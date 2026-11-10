@@ -61,7 +61,7 @@ Checks and transparency:
 
 - **Read-back check.** After `write_cells`, the cells are read back. The step line says "verified" or warns about cells Excel stored differently (for example a date typed as text) or that show an error value (`#REF!`, `#DIV/0!`...). `null` in the data leaves a cell unchanged; use an empty string to blank it.
 - **Cell notes.** When the model writes formulas it can attach a note on the top-left cell saying which cells they use (needs Excel API 1.18; skipped gracefully on older Excel, and undone with the command).
-- **What was sent.** After each request the pane lists the ranges the model read, plus a "Worked for 12s · 5 steps · 3 changes" line.
+- **What was sent.** After each request the pane lists the ranges the model read, plus a "Worked for 12s · 5 steps · 3 changes · 120 cells" line. The cell count appears only when every write reported its size, and a "Changed:" line lists the ranges that were written as links that select them in Excel.
 - **Clickable addresses.** Cell addresses the model writes in backticks in its reply are links that select that range in Excel.
 - **Safer pivots and charts.** A PivotTable is refused if its destination sits inside its own source or on existing data, and a chart is refused on an empty range. Tool errors carry a code and a "Try:" hint (`DESTINATION_OCCUPIED: ... Try: ...`) so the model can recover.
 - **Continue.** If a long task stops at the step limit, a **Continue** button resumes it.

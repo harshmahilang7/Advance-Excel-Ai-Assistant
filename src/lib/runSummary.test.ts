@@ -40,3 +40,14 @@ describe("formatRunSummary", () => {
     expect(formatRunSummary({ ms: 1_400, toolCalls: 0, changes: 0, queued: false })).toBe("Worked for 1s · no changes");
   });
 });
+
+describe("formatRunSummary cells", () => {
+  it("adds the cell count when known and not queued", () => {
+    expect(formatRunSummary({ ms: 5000, toolCalls: 2, changes: 1, queued: false, cells: 120 })).toBe("Worked for 5s · 2 steps · 1 change · 120 cells");
+    expect(formatRunSummary({ ms: 5000, toolCalls: 2, changes: 1, queued: false, cells: 1 })).toContain("1 cell");
+  });
+  it("leaves it out when unknown or queued", () => {
+    expect(formatRunSummary({ ms: 5000, toolCalls: 2, changes: 1, queued: false, cells: null })).not.toContain("cell");
+    expect(formatRunSummary({ ms: 5000, toolCalls: 2, changes: 1, queued: true, cells: 9 })).not.toContain("cell");
+  });
+});
