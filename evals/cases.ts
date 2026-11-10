@@ -316,4 +316,55 @@ export const CASES: readonly EvalCase[] = [
       },
     ],
   },
+  {
+    id: "plan-multi-part",
+    prompt: "Add a Total column, bold the header row, and make a column chart of the totals",
+    sheet: SALES,
+    mustCall: ["propose_plan", "write_cells", "format_range", "create_chart"],
+    mustNotCall: ["clear_range"],
+    check: (calls) => (calls[0]?.name === "propose_plan" ? null : "expected propose_plan to be the first call for a three-part request"),
+    example: [
+      { name: "propose_plan", args: { steps: ["Add a Total column in E", "Bold the header row", "Create a column chart of the totals"] } },
+      { name: "write_cells", args: { address: "E1", data: [["Total"], ["=C2*D2"], ["=C3*D3"], ["=C4*D4"], ["=C5*D5"], ["=C6*D6"]] } },
+      { name: "format_range", args: { address: "A1:E1", bold: true } },
+      { name: "create_chart", args: { sourceAddress: "E1:E6", chartType: "ColumnClustered", title: "Totals" } },
+    ],
+  },
+  {
+    id: "no-plan-simple",
+    prompt: "Bold the header row",
+    sheet: SALES,
+    mustCall: ["format_range"],
+    mustNotCall: ["propose_plan"],
+    example: [{ name: "format_range", args: { address: "A1:D1", bold: true } }],
+  },
+  {
+    id: "note-on-formulas",
+    prompt: "Add a Total column that multiplies Qty by Price",
+    sheet: SALES,
+    mustCall: ["write_cells"],
+    check: (calls) =>
+      someCall(calls, "write_cells", (a) => list(a.data).flat().some((c) => text(c).startsWith("=")) && text(a.note).trim().length > 0)
+        ? null
+        : "expected write_cells with formulas to include a note saying where they get their values",
+    example: [
+      {
+        name: "write_cells",
+        args: {
+          address: "E1",
+          data: [["Total"], ["=C2*D2"], ["=C3*D3"], ["=C4*D4"], ["=C5*D5"], ["=C6*D6"]],
+          note: "Total = Qty (column C) x Price (column D) for each row.",
+        },
+      },
+    ],
+  },
+  {
+    id: "reply-cell-links",
+    prompt: "Add a Total column that multiplies Qty by Price",
+    sheet: SALES,
+    mustCall: ["write_cells"],
+    check: (_calls, reply) => (/`(?:[A-Za-z0-9 ']+!)?\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?`/.test(reply) ? null : "expected the reply to give cell addresses in backticks"),
+    example: [{ name: "write_cells", args: { address: "E1", data: [["Total"], ["=C2*D2"], ["=C3*D3"], ["=C4*D4"], ["=C5*D5"], ["=C6*D6"]] } }],
+    exampleReply: "Added a Total column in `E1:E6`, multiplying Qty by Price.",
+  },
 ];

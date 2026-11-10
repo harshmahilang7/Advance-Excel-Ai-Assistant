@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MAX_NOTE_CHARS } from "../excel/sourceNote";
 import { MAX_PLAN_STEPS, MAX_STEP_CHARS } from "./plan";
+import { formatToolError } from "./toolError";
 import { CLEAN_OPERATIONS } from "../excel/cleaning";
 
 /** A1-style address, optionally sheet-qualified: A1, $A$1:B9, A:A, Sheet1!A1, 'My Sheet'!A1:C3 */
@@ -226,12 +227,17 @@ const isToolName = (name: string): name is ToolName => Object.hasOwn(schemas, na
 
 /** Validates untrusted model output into a typed tool call. Never throws. */
 export const parseToolCall = (name: string, args: unknown): ParseResult => {
-  if (!isToolName(name)) return { ok: false, error: `Unknown tool "${name}".` };
+  if (!isToolName(name)) {
+    return { ok: false, error: formatToolError("UNKNOWN_TOOL", `There is no tool named "${name}".`, "call one of the tools you were given.") };
+  }
   const parsed = schemas[name].safeParse(args ?? {});
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const where = issue && issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";
-    return { ok: false, error: `Invalid arguments for ${name}. ${where}${issue?.message ?? "invalid"}` };
+    return {
+      ok: false,
+      error: formatToolError("INVALID_ARGUMENTS", `Invalid arguments for ${name}. ${where}${issue?.message ?? "invalid"}`, "fix that argument and call the tool again."),
+    };
   }
   return { ok: true, call: { name, args: parsed.data } as ToolCall };
 };

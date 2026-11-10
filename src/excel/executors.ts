@@ -9,6 +9,8 @@ import { readSheetOverviewIn } from "./readSheets";
 import { cleanNote, localCell } from "./sourceNote";
 import { formatPlan } from "../agent/plan";
 import { describeVerification, verifyWrite } from "./writeVerify";
+import { formatToolError } from "../agent/toolError";
+import { checkPivotDestination } from "./pivotChecks";
 import { resolvePivotFields, type PivotAggregation } from "./pivotFields";
 import { preparePivotSource } from "./pivotSource";
 import type { UndoLog } from "./undo";
@@ -67,6 +69,32 @@ const verifyWritten = async (ctx: Ctx, target: Excel.Range, wrote: readonly (rea
   } catch {
     return "";
   }
+};
+
+/** Pre-flight for a PivotTable destination: null when safe, else a tool error. Changes nothing. */
+const pivotDestinationError = async (ctx: Ctx, sourceAddress: string, destinationAddress: string): Promise<string | null> => {
+  const src = resolveRange(ctx, sourceAddress);
+  const dest = resolveRange(ctx, destinationAddress).getCell(0, 0);
+  src.load(["rowIndex", "columnIndex", "rowCount", "columnCount"]);
+  src.worksheet.load("name");
+  dest.load(["rowIndex", "columnIndex", "values"]);
+  dest.worksheet.load("name");
+  await ctx.sync();
+  const cell = dest.values[0]?.[0];
+  return checkPivotDestination({
+    sheet: dest.worksheet.name,
+    row: dest.rowIndex,
+    col: dest.columnIndex,
+    address: destinationAddress,
+    hasData: cell !== "" && cell !== null && cell !== undefined,
+    source: {
+      sheet: src.worksheet.name,
+      top: src.rowIndex,
+      left: src.columnIndex,
+      bottom: src.rowIndex + src.rowCount - 1,
+      right: src.columnIndex + src.columnCount - 1,
+    },
+  });
 };
 
 const NOTES_API = "1.18";
@@ -260,6 +288,15 @@ const handlers: Handlers = {
 
   async create_chart(ctx, { sourceAddress, chartType, title }, undo) {
     const range = resolveRange(ctx, sourceAddress);
+    const used = range.getUsedRangeOrNullObject(true);
+    used.load("isNullObject");
+    await ctx.sync();
+    if (used.isNullObject) {
+      return {
+        ok: false,
+        error: formatToolError("SOURCE_EMPTY", `There is no data in ${sourceAddress} to chart.`, "read the sheet and pass the range that holds the data, headers included."),
+      };
+    }
     const chart = range.worksheet.charts.add(chartType, range, Excel.ChartSeriesBy.auto);
     if (title) chart.title.text = title;
     chart.load("name");
@@ -278,14 +315,22 @@ const handlers: Handlers = {
 
   async create_pivot_table(ctx, args, undo) {
     if (!Office.context.requirements.isSetSupported("ExcelApi", "1.8")) {
-      return { ok: false, error: "PivotTables need Excel API 1.8 or newer. Update Excel." };
+      return { ok: false, error: formatToolError("EXCEL_TOO_OLD", "PivotTables need Excel API 1.8 or newer.", "tell the user to update Excel, or summarize with SUMIF formulas instead.") };
+    }
+    if (args.destinationAddress) {
+      const blocked = await pivotDestinationError(ctx, args.sourceAddress, args.destinationAddress);
+      if (blocked) return { ok: false, error: blocked };
     }
     const suffix = Date.now().toString(36).slice(-4);
     const prepared = await preparePivotSource(ctx, resolveRange(ctx, args.sourceAddress), args.visibleRowsOnly, suffix, undo);
-    if (!prepared.ok) return { ok: false, error: prepared.error };
+    if (!prepared.ok) {
+      return { ok: false, error: formatToolError("PIVOT_SOURCE_INVALID", prepared.error, "read the source range and fix its header row, then try again.") };
+    }
     const source = prepared.range;
     const fields = resolvePivotFields(prepared.headers, args);
-    if (!fields.ok) return { ok: false, error: fields.error };
+    if (!fields.ok) {
+      return { ok: false, error: formatToolError("PIVOT_SOURCE_INVALID", fields.error, "use the header names exactly as they appear in the source.") };
+    }
 
     const name = args.name ?? `Pivot_${Date.now().toString(36).slice(-5)}`;
     let destination: Excel.Range;
@@ -338,7 +383,7 @@ const handlers: Handlers = {
     await ctx.sync();
     if (used.isNullObject) return ok("Nothing to audit: the range is empty.", { findings: [] });
     if (used.rowCount * used.columnCount > MAX_AUDIT_CELLS) {
-      return { ok: false, error: `Range is too large to audit (over ${MAX_AUDIT_CELLS} cells). Give a smaller address.` };
+      return { ok: false, error: formatToolError("RANGE_TOO_LARGE", `The range is too large to audit (over ${MAX_AUDIT_CELLS} cells).`, "pass a smaller address, such as one block of columns.") };
     }
     used.load(["formulasR1C1", "values"]);
     await ctx.sync();
@@ -451,13 +496,13 @@ const handlers: Handlers = {
 
   async remove_duplicates(ctx, { address, columnIndexes, hasHeaders }, undo) {
     if (!Office.context.requirements.isSetSupported("ExcelApi", "1.9")) {
-      return { ok: false, error: "Removing duplicates needs Excel API 1.9 or newer. Update Excel." };
+      return { ok: false, error: formatToolError("EXCEL_TOO_OLD", "Removing duplicates needs Excel API 1.9 or newer.", "tell the user to update Excel.") };
     }
     const range = resolveRange(ctx, address);
     range.load("columnCount");
     await ctx.sync();
     if (columnIndexes.some((i) => i >= range.columnCount)) {
-      return { ok: false, error: `columnIndexes must be between 0 and ${range.columnCount - 1} for ${address}.` };
+      return { ok: false, error: formatToolError("COLUMN_OUT_OF_RANGE", `columnIndexes must be between 0 and ${range.columnCount - 1} for ${address}.`, "use 0-based column positions within the range.") };
     }
     const where = await snapshotFormulas(ctx, range, undo);
     const result = range.removeDuplicates([...columnIndexes], hasHeaders);
@@ -500,7 +545,7 @@ const handlers: Handlers = {
 
   async find_replace(ctx, a, undo) {
     if (!Office.context.requirements.isSetSupported("ExcelApi", "1.9")) {
-      return { ok: false, error: "Find & replace needs Excel API 1.9 or newer. Update Excel." };
+      return { ok: false, error: formatToolError("EXCEL_TOO_OLD", "Find & replace needs Excel API 1.9 or newer.", "tell the user to update Excel.") };
     }
     const scope = a.address
       ? resolveRange(ctx, a.address)
@@ -566,7 +611,7 @@ const handlers: Handlers = {
     range.load(["rowCount", "columnCount"]);
     await ctx.sync();
     if (range.rowCount * range.columnCount > MAX_CLEAN_CELLS) {
-      return { ok: false, error: `Range too large to clean (max ${MAX_CLEAN_CELLS} cells). Use a smaller range.` };
+      return { ok: false, error: formatToolError("RANGE_TOO_LARGE", `The range is too large to clean (max ${MAX_CLEAN_CELLS} cells).`, "clean one block of columns at a time.") };
     }
     range.load(["address", "formulas"]);
     await ctx.sync();

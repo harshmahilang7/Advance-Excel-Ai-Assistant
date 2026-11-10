@@ -32,7 +32,10 @@ describe("parseToolCall", () => {
   it("rejects unknown tools with a clear error", () => {
     const r = parseToolCall("delete_workbook", {});
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/unknown tool/i);
+    if (!r.ok) {
+      expect(r.error).toMatch(/^UNKNOWN_TOOL:/);
+      expect(r.error).toContain("delete_workbook");
+    }
   });
 
   it("validates chart type enum and sort options", () => {

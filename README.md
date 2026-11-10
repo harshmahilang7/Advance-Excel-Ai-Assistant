@@ -159,7 +159,7 @@ public/assets/icon.svg  Source icon; `npm run icons` renders the PNG sizes
 
 ## Evals
 
-`npm test` is offline. `npm run eval` is separate: it sends 22 canned prompts (add a column, sort, pivot, freeze panes, a prompt-injection cell, and so on) to the real Gemini API and checks which tools the model calls, so you can catch prompt or schema regressions. The workbook behind the tools is simulated, and arguments are checked with the real schemas.
+`npm test` is offline. `npm run eval` is separate: it sends 26 canned prompts (add a column, sort, pivot, freeze panes, a prompt-injection cell, and so on) to the real Gemini API and checks which tools the model calls, so you can catch prompt or schema regressions. The workbook behind the tools is simulated, and arguments are checked with the real schemas.
 
 ```bash
 GEMINI_API_KEY=your-key npm run eval
