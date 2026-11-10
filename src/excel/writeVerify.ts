@@ -57,6 +57,7 @@ export const verifyWrite = (
   const errors: ErrorCell[] = [];
   wrote.forEach((rowCells, r) => {
     rowCells.forEach((expected, c) => {
+      if (expected === null) return; // null = left unchanged by the write
       total += 1;
       const cell = cellName(origin.row + r, origin.col + c);
       const got = readFormulas[r]?.[c];

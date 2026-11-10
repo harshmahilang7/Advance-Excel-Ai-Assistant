@@ -195,7 +195,8 @@ const handlers: Handlers = {
     const cols = data[0]?.length ?? 1;
     const target = resolveRange(ctx, address).getCell(0, 0).getResizedRange(rows - 1, cols - 1);
     const where = await snapshotFormulas(ctx, target, undo);
-    target.formulas = data.map((row) => row.map((c) => c ?? ""));
+    // null cells stay null: Office.js leaves those cells unchanged. Use "" to blank a cell.
+    target.formulas = data.map((row) => [...row]);
     await ctx.sync();
     const verified = await verifyWritten(ctx, target, data);
     const noteStatus = await attachSourceNote(ctx, target, note, undo);

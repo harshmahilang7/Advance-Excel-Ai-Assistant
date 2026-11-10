@@ -243,7 +243,7 @@ const descriptions: Record<ToolName, string> = {
   read_range:
     "Read cell values and formulas from a range. Use to inspect data before changing it. Returns up to maxRows rows (default 100). Rows hidden by a filter are skipped; the result reports how many.",
   write_cells:
-    "Write a 2D array of values starting at the top-left cell of address. A string starting with '=' is a formula. Prefer formulas over hard-coded results so values stay live. When writing formulas, also pass note: one or two plain sentences saying which cells or ranges they use and what they calculate; it is saved as a cell note on the top-left cell so the user can check the work.",
+    "Write a 2D array of values starting at the top-left cell of address. A string starting with '=' is a formula. null leaves that cell unchanged; use an empty string to blank a cell. Prefer formulas over hard-coded results so values stay live. When writing formulas, also pass note: one or two plain sentences saying which cells or ranges they use and what they calculate; it is saved as a cell note on the top-left cell so the user can check the work.",
   format_range:
     "Apply formatting to a range: bold, italic, font colour, fill colour (hex like #FFEE00), number format (e.g. '0.00%', '$#,##0.00', 'yyyy-mm-dd'), alignment, wrap.",
   sort_range: "Sort a range by one column. columnIndex is 0-based within the range. Set hasHeaders true to keep the header row in place.",

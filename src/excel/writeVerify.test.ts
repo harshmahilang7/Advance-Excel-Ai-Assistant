@@ -17,9 +17,14 @@ describe("verifyWrite", () => {
     expect(r.matched).toBe(2);
   });
 
-  it("treats null and empty text as a blank cell", () => {
-    const r = verifyWrite([[null, ""]], [["", ""]], [["", ""]]);
+  it("treats empty text as a blank cell", () => {
+    const r = verifyWrite([["", ""]], [["", ""]], [["", ""]]);
     expect(r.matched).toBe(2);
+  });
+
+  it("skips null cells: they were left unchanged, so whatever is there is fine", () => {
+    const r = verifyWrite([["a", null]], [["a", "old"]], [["a", "#N/A"]]);
+    expect(r).toMatchObject({ total: 1, matched: 1, differed: [], errors: [] });
   });
 
   it("reports cells that read back differently with A1-style positions", () => {
