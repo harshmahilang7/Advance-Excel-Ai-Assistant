@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Dropdown, Option, Text } from "@fluentui/react-components";
+import { Button, Dropdown, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger, Option, Text } from "@fluentui/react-components";
 import { browserKeyStore } from "../lib/keyStore";
 import { validateKeys, type ModelInfo } from "../agent/gemini";
 import { pickDefaultModel } from "../agent/models";
@@ -17,6 +17,7 @@ export const App = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [modelId, setModelId] = useState<string>("");
   const [editing, setEditing] = useState(false);
+  const [showSelection, setShowSelection] = useState(false);
   const [restoring, setRestoring] = useState(() => store.list().length > 0);
 
   const start = (apiKeys: readonly string[], models: readonly ModelInfo[]) => {
@@ -58,11 +59,21 @@ export const App = () => {
   }
 
   return (
-    <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, height: "100vh", boxSizing: "border-box" }}>
-      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <Text weight="semibold">Excel-Ai-Assistant</Text>
+    <div
+      style={{
+        padding: 8,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        height: "100vh",
+        boxSizing: "border-box",
+        overflow: "hidden",
+      }}
+    >
+      <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
         <Dropdown
           size="small"
+          aria-label="Model"
           style={{ flex: 1, minWidth: 0 }}
           value={session.models.find((m) => m.id === modelId)?.label ?? modelId}
           selectedOptions={[modelId]}
@@ -74,31 +85,38 @@ export const App = () => {
             </Option>
           ))}
         </Dropdown>
+        <Menu>
+          <MenuTrigger disableButtonEnhancement>
+            <Button size="small" appearance="subtle" aria-label="Settings" title="Settings">
+              ⋯
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem onClick={() => setEditing(true)}>Manage API keys ({session.apiKeys.length})</MenuItem>
+              <MenuItem onClick={() => setShowSelection((v) => !v)}>
+                {showSelection ? "Hide selection summary" : "Show selection summary"}
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  store.clear();
+                  setSession(null);
+                }}
+              >
+                Remove all API keys
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
       </div>
 
-      <Chat key={`${session.apiKeys.join("|")}:${modelId}`} apiKeys={session.apiKeys} modelId={modelId} />
+      {showSelection && (
+        <div style={{ flexShrink: 0, maxHeight: 140, overflow: "auto" }}>
+          <SelectionPanel />
+        </div>
+      )}
 
-      <details>
-        <summary style={{ cursor: "pointer", fontSize: 12 }}>Debug: selection summary</summary>
-        <SelectionPanel />
-      </details>
-      <Button
-        size="small"
-        appearance="subtle"
-        onClick={() => setEditing(true)}
-      >
-        Manage API keys ({session.apiKeys.length})
-      </Button>
-      <Button
-        size="small"
-        appearance="subtle"
-        onClick={() => {
-          store.clear();
-          setSession(null);
-        }}
-      >
-        Remove all API keys
-      </Button>
+      <Chat key={`${session.apiKeys.join("|")}:${modelId}`} apiKeys={session.apiKeys} modelId={modelId} />
     </div>
   );
 };

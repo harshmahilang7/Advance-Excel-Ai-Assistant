@@ -3,12 +3,14 @@ import { Button, Spinner, Switch, Text, Textarea } from "@fluentui/react-compone
 import { addEntry, dropLastMatching, formatChangeLog, type ChangeEntry } from "../agent/changeLog";
 import { applyPending, createPreviewExecutor, isReadOnlyTool, type PendingCall } from "../agent/preview";
 import { isPlanTool } from "../agent/plan";
+import { ReplyText } from "./ReplyText";
+import { formatRunSummary } from "../lib/runSummary";
 import { addRead, describeRead, formatReadLog } from "../agent/readLog";
 import { browserChangeLogStore } from "../lib/changeLogStore";
 import { createGeminiClient } from "../agent/geminiClient";
 import { trimHistory } from "../agent/history";
 import { runAgent, type AgentEvent, type ChatMessage, type StreamEvent } from "../agent/loop";
-import { SYSTEM_PROMPT } from "../agent/prompt";
+import { CONTINUE_PROMPT, SYSTEM_PROMPT } from "../agent/prompt";
 import { estimateHistoryTokens, estimateTokens, formatTokens, LARGE_CONTEXT_TOKENS } from "../agent/tokens";
 import { toolDeclarations } from "../agent/tools";
 import { createExcelExecutor } from "../excel/executors";
@@ -63,6 +65,7 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const [canContinue, setCanContinue] = useState(false);
   const [status, setStatus] = useState(WAITING);
   const [streamText, setStreamText] = useState("");
   const [contextTokens, setContextTokens] = useState(FIXED_TOKENS);
@@ -145,15 +148,16 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
   }, []);
 
   const send = useCallback(
-    async (raw: string) => {
+    async (raw: string, keepLast = false) => {
       const text = raw.trim();
       if (!text || running) return;
+      setCanContinue(false);
       if (!isExcelHost()) {
         push({ kind: "error", text: "Not running inside Excel. Open this pane from the Excel ribbon." });
         return;
       }
       setInput("");
-      lastCommandRef.current = text;
+      if (!keepLast) lastCommandRef.current = text;
       push({ kind: "user", text });
       setStatus(WAITING);
       setRunning(true);
@@ -163,11 +167,14 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
       let queued: readonly PendingCall[] = [];
       let steps: readonly string[] = [];
       let reads: readonly string[] = [];
+      let changes = 0;
+      const startedAt = Date.now();
       const collect = (e: AgentEvent) => {
         onEvent(e);
         if (e.type === "tool" && e.ok) {
           const read = describeRead(e.name, e.args);
           if (read) reads = addRead(reads, read);
+          if (!isReadOnlyTool(e.name)) changes += 1;
         }
         // Only real, successful writes count. In preview mode nothing ran, so nothing is recorded here.
         if (!previewMode && e.type === "tool" && e.ok && !isReadOnlyTool(e.name)) steps = [...steps, e.summary];
@@ -192,9 +199,16 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
           onStream,
         });
         historyRef.current = trimHistory(result.history, KEEP_USER_TURNS);
-        push({ kind: "note", text: formatReadLog(reads) });
+        push({
+          kind: "note",
+          text: `${formatRunSummary({ ms: Date.now() - startedAt, toolCalls: result.toolCalls, changes, queued: previewMode })}
+${formatReadLog(reads)}`,
+        });
         if (result.aborted) push({ kind: "note", text: "Stopped." });
-        else if (result.hitStepLimit) push({ kind: "note", text: "Stopped after the step limit. Ask me to continue if needed." });
+        else if (result.hitStepLimit) {
+          push({ kind: "note", text: "Stopped after the step limit. Click Continue to keep going." });
+          setCanContinue(true);
+        }
       } catch (err) {
         if (controller.signal.aborted) push({ kind: "note", text: "Stopped." });
         else push({ kind: "error", text: friendlyError(err) });
@@ -247,8 +261,8 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
   }, [undo, push, setChangeLog]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 0, flex: 1 }}>
-      <div style={{ flex: 1, overflowY: "auto", display: "grid", gap: 6, alignContent: "start", minHeight: 120 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minHeight: 0, flex: 1, overflow: "hidden" }}>
+      <div style={{ flex: "1 1 0", overflowY: "auto", display: "grid", gap: 6, alignContent: "start", minHeight: 60 }}>
         {lines.length === 0 && (
           <div style={{ display: "grid", gap: 6 }}>
             <Text size={200}>Tell me what to do with your sheet. Try:</Text>
@@ -261,7 +275,7 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
         )}
         {lines.map((l) => (
           <div key={l.id} style={{ background: colorFor(l), borderRadius: 6, padding: "6px 8px", fontSize: 13, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-            {l.text}
+            {l.kind === "assistant" ? <ReplyText text={l.text} /> : l.text}
             {(l.kind === "assistant" || l.kind === "error") && (
               <div style={{ textAlign: "right" }}>
                 <Button
@@ -297,6 +311,7 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
         <div ref={bottomRef} />
       </div>
 
+      <div style={{ display: "grid", gap: 6, flexShrink: 0 }}>
       {running && (
         <div
           role="status"
@@ -305,7 +320,7 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
             display: "flex",
             alignItems: "center",
             gap: 8,
-            padding: "8px 10px",
+            padding: "6px 8px",
             borderRadius: 6,
             background: "#e8f1fb",
             border: "1px solid #b3d1f2",
@@ -319,23 +334,28 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
 
       <Text size={100} style={{ color: contextTokens >= LARGE_CONTEXT_TOKENS ? "#a4262c" : "#605e5c" }}>
         {contextTokens >= LARGE_CONTEXT_TOKENS
-          ? `Context is large (about ${formatTokens(contextTokens)} tokens sent each time). Click Clear chat to cut cost and speed things up.`
-          : `Each request carries about ${formatTokens(contextTokens)} tokens of context.`}
+          ? `Context is large (~${formatTokens(contextTokens)} tokens per request). Clear chat to cut cost.`
+          : `Context: ~${formatTokens(contextTokens)} tokens per request`}
       </Text>
 
       <Switch
         checked={previewMode}
         onChange={(_, d) => setPreviewMode(d.checked)}
-        label="Preview changes before applying"
+        label="Preview before applying"
         disabled={running || pending.length > 0}
       />
 
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0 }}>
         <Button size="small" onClick={() => void doUndo()} disabled={!canUndo || running || pending.length > 0}>Undo last</Button>
+        {canContinue && (
+          <Button size="small" appearance="primary" onClick={() => void send(CONTINUE_PROMPT, true)} disabled={running || pending.length > 0}>
+            Continue
+          </Button>
+        )}
         <Button size="small" onClick={() => void send(lastCommandRef.current)} disabled={running || pending.length > 0 || !lastCommandRef.current}>
           Retry last
         </Button>
-        <Button size="small" appearance="subtle" onClick={() => { setLines([]); setPending([]); historyRef.current = []; setContextTokens(FIXED_TOKENS); changeLogRef.current = []; changeStore.clear(workbookKey); }} disabled={running}>
+        <Button size="small" appearance="subtle" onClick={() => { setLines([]); setPending([]); setCanContinue(false); historyRef.current = []; setContextTokens(FIXED_TOKENS); changeLogRef.current = []; changeStore.clear(workbookKey); }} disabled={running}>
           Clear chat
         </Button>
       </div>
@@ -344,8 +364,8 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
         value={input}
         onChange={(_, d) => setInput(d.value)}
         placeholder="e.g. Add a column that totals each row"
-        resize="vertical"
-        rows={3}
+        resize="none"
+        rows={2}
         disabled={running || pending.length > 0}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
@@ -359,6 +379,7 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
       ) : (
         <Button appearance="primary" disabled={!input.trim() || pending.length > 0} onClick={() => void send(input)}>Send</Button>
       )}
+      </div>
     </div>
   );
 };

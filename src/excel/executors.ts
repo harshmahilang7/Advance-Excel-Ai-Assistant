@@ -161,7 +161,7 @@ const handlers: Handlers = {
   async get_workbook_info(ctx) {
     const { sheets, omittedSheets } = await readSheetOverviewIn(ctx);
     const more = omittedSheets > 0 ? `, ${omittedSheets} more not listed` : "";
-    return ok(`${sheets.length} sheet(s)${more}`, sheets.map((s) => ({ name: s.name, usedRange: s.usedRange, headers: s.headers })));
+    return ok(`Looked at the workbook: ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}${more}`, sheets.map((s) => ({ name: s.name, usedRange: s.usedRange, headers: s.headers })));
   },
 
   async read_range(ctx, { address, maxRows }) {
