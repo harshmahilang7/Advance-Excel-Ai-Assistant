@@ -1,4 +1,6 @@
 import { friendlyError } from "../lib/friendlyError";
+import { isReadOnlyTool } from "./preview";
+import { buildSelfCheckMessage, findingsFrom, rangesToCheck, shouldSelfCheck, type CheckFinding } from "./selfCheck";
 import { parseToolCall } from "./tools";
 
 export interface RawToolCall {
@@ -49,6 +51,8 @@ export interface AgentRun {
   readonly context: string;
   readonly history?: readonly ChatMessage[];
   readonly maxSteps?: number;
+  /** After a multi-step write task, audit what was written and let the model fix real problems (once). */
+  readonly selfCheck?: boolean;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: AgentEvent) => void;
   readonly onStream?: (event: StreamEvent) => void;
@@ -81,6 +85,23 @@ const toResponse = (name: string, result: ToolResult): ToolResponse => ({
   response: result.ok ? { ok: true, summary: result.summary, data: result.data } : { ok: false, error: result.error },
 });
 
+/** Audits the written ranges with the real tool. Returns the findings (possibly none). */
+const auditWritten = async (run: AgentRun, ranges: readonly string[]): Promise<readonly CheckFinding[]> => {
+  const found: CheckFinding[] = [];
+  for (const address of ranges) {
+    const result = await runOne(run.execute, { name: "audit_formulas", args: { address } });
+    run.onEvent?.({
+      type: "tool",
+      name: "audit_formulas",
+      args: { address },
+      ok: result.ok,
+      summary: result.ok ? `Self-check: ${result.summary}` : result.error,
+    });
+    if (result.ok) found.push(...findingsFrom(result.data));
+  }
+  return found;
+};
+
 /** Model <-> tool loop. Pure orchestration: no Excel or network code lives here. */
 export const runAgent = async (run: AgentRun): Promise<AgentResult> => {
   const maxSteps = run.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -90,6 +111,9 @@ export const runAgent = async (run: AgentRun): Promise<AgentResult> => {
   ];
   let toolCalls = 0;
   let lastText = "";
+  let changeCount = 0;
+  let checked = false;
+  let recorded: readonly { name: string; args: unknown; ok: boolean }[] = [];
 
   for (let step = 0; step < maxSteps; step++) {
     if (run.signal?.aborted) return { finalText: lastText, toolCalls, hitStepLimit: false, aborted: true, history };
@@ -103,6 +127,17 @@ export const runAgent = async (run: AgentRun): Promise<AgentResult> => {
     history = [...history, { role: "model", text: turn.text, calls: turn.calls, raw: turn.raw }];
     if (turn.text) lastText = turn.text;
 
+    if (turn.calls.length === 0 && run.selfCheck && !checked && shouldSelfCheck(changeCount) && !run.signal?.aborted) {
+      checked = true;
+      const ranges = rangesToCheck(recorded);
+      const findings = ranges.length > 0 ? await auditWritten(run, ranges) : [];
+      toolCalls += ranges.length;
+      if (findings.length > 0) {
+        history = [...history, { role: "user", text: buildSelfCheckMessage(findings) }];
+        continue;
+      }
+    }
+
     if (turn.calls.length === 0) {
       if (turn.text) run.onEvent?.({ type: "text", text: turn.text });
       return { finalText: turn.text, toolCalls, hitStepLimit: false, aborted: false, history };
@@ -113,6 +148,8 @@ export const runAgent = async (run: AgentRun): Promise<AgentResult> => {
       const result = await runOne(run.execute, call);
       toolCalls += 1;
       results.push(toResponse(call.name, result));
+      recorded = [...recorded, { name: call.name, args: call.args, ok: result.ok }];
+      if (result.ok && !isReadOnlyTool(call.name)) changeCount += 1;
       run.onEvent?.({
         type: "tool",
         name: call.name,

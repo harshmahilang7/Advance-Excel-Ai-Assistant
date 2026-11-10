@@ -111,3 +111,83 @@ describe("runAgent", () => {
     expect(replayed && replayed.role === "model" && replayed.raw).toBe(raw);
   });
 });
+
+describe("runAgent self-check", () => {
+  const writes = [
+    { name: "write_cells", args: { address: "E1:E6", data: [["Total"]] } },
+    { name: "write_cells", args: { address: "G1", data: [["Sum"]] } },
+  ];
+  const auditing = (findings: unknown[]) => {
+    const names: string[] = [];
+    const execute: ToolExecutor = async (name, args) => {
+      names.push(name === "audit_formulas" ? `audit:${(args as { address?: string }).address}` : name);
+      return name === "audit_formulas"
+        ? { ok: true, summary: "audited", data: { findings } }
+        : { ok: true, summary: `ran ${name}`, data: null };
+    };
+    return { execute, names };
+  };
+  const finding = { kind: "error_value", address: "E3", detail: "Cell shows #REF!" };
+
+  it("audits the written ranges and gives the model a chance to fix problems", async () => {
+    const model = scriptedModel([
+      { text: "", calls: writes },
+      { text: "First summary", calls: [] },
+      { text: "Fixed and done", calls: [] },
+    ]);
+    const { execute, names } = auditing([finding]);
+    const r = await runAgent({ model, execute, userMessage: "go", context: "ctx", selfCheck: true });
+    expect(names).toEqual(["write_cells", "write_cells", "audit:E1:E6", "audit:G1"]);
+    expect(r.finalText).toBe("Fixed and done");
+    const last = model.seen.at(-1)?.at(-1);
+    expect(last).toMatchObject({ role: "user" });
+    expect((last as { text: string }).text).toContain("E3");
+  });
+
+  it("finishes without an extra model turn when the audit is clean", async () => {
+    const model = scriptedModel([
+      { text: "", calls: writes },
+      { text: "All good", calls: [] },
+    ]);
+    const { execute } = auditing([]);
+    const r = await runAgent({ model, execute, userMessage: "go", context: "ctx", selfCheck: true });
+    expect(r.finalText).toBe("All good");
+    expect(model.seen).toHaveLength(2);
+  });
+
+  it("checks only once", async () => {
+    const model = scriptedModel([
+      { text: "", calls: writes },
+      { text: "one", calls: [] },
+      { text: "two", calls: [] },
+    ]);
+    const { execute } = auditing([finding]);
+    const r = await runAgent({ model, execute, userMessage: "go", context: "ctx", selfCheck: true });
+    expect(r.finalText).toBe("two");
+    expect(model.seen).toHaveLength(3);
+  });
+
+  it("does nothing when self-check is off or the task was small", async () => {
+    const off = auditing([finding]);
+    await runAgent({ model: scriptedModel([{ text: "", calls: writes }, { text: "done", calls: [] }]), execute: off.execute, userMessage: "go", context: "c" });
+    expect(off.names.some((n) => n.startsWith("audit"))).toBe(false);
+
+    const small = auditing([finding]);
+    await runAgent({
+      model: scriptedModel([{ text: "", calls: [writes[0]!] }, { text: "done", calls: [] }]),
+      execute: small.execute,
+      userMessage: "go",
+      context: "c",
+      selfCheck: true,
+    });
+    expect(small.names.some((n) => n.startsWith("audit"))).toBe(false);
+  });
+
+  it("emits the audit as a tool event", async () => {
+    const events: AgentEvent[] = [];
+    const model = scriptedModel([{ text: "", calls: writes }, { text: "ok", calls: [] }]);
+    await runAgent({ model, execute: auditing([]).execute, userMessage: "go", context: "c", selfCheck: true, onEvent: (e) => events.push(e) });
+    expect(events.some((e) => e.type === "tool" && e.name === "audit_formulas")).toBe(true);
+  });
+});
+

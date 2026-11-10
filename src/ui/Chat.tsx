@@ -4,6 +4,9 @@ import { addEntry, dropLastMatching, formatChangeLog, type ChangeEntry } from ".
 import { applyPending, createPreviewExecutor, isReadOnlyTool, type PendingCall } from "../agent/preview";
 import { isPlanTool } from "../agent/plan";
 import { ReplyText } from "./ReplyText";
+import { importTable } from "../excel/importTable";
+import { parseDelimited } from "../lib/csv";
+import { addTemplate, browserTemplateStore, removeTemplate, type Template } from "../lib/templateStore";
 import { formatRunSummary } from "../lib/runSummary";
 import { addRead, describeRead, formatReadLog } from "../agent/readLog";
 import { browserChangeLogStore } from "../lib/changeLogStore";
@@ -43,6 +46,7 @@ const colorFor = (line: Line): string => {
 };
 
 const WAITING = "Waiting for the AI...";
+const MAX_IMPORT_BYTES = 5_000_000;
 /** Tokens every request carries before any chat: system prompt plus tool declarations. */
 const FIXED_TOKENS = estimateTokens(SYSTEM_PROMPT) + estimateTokens(JSON.stringify(toolDeclarations));
 
@@ -74,6 +78,9 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
   const pendingLabelRef = useRef("");
   const discardNoteRef = useRef("");
   const [suggestions, setSuggestions] = useState<readonly string[]>(DEFAULT_SUGGESTIONS);
+  const templateStore = useMemo(() => browserTemplateStore(), []);
+  const [templates, setTemplates] = useState<readonly Template[]>(() => templateStore.load());
+  const importRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<readonly ChatMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const idRef = useRef(Math.max(0, ...chatStore.load(workbookKey).map((l) => l.id)));
@@ -195,6 +202,7 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
           context,
           history: historyRef.current,
           signal: controller.signal,
+          selfCheck: !previewMode,
           onEvent: collect,
           onStream,
         });
@@ -225,6 +233,66 @@ ${formatReadLog(reads)}`,
       }
     },
     [running, previewMode, push, undo, model, execute, onEvent, onStream, setChangeLog],
+  );
+
+  const saveTemplate = useCallback(() => {
+    const result = addTemplate(templates, input.trim() || lastCommandRef.current);
+    if (result.status === "added") {
+      setTemplates(result.list);
+      templateStore.save(result.list);
+    }
+    const message = {
+      added: "Saved as a template. Find it on the start screen after Clear chat.",
+      duplicate: "That command is already saved as a template.",
+      empty: "Type a command, or send one first, then save it as a template.",
+      full: "You have the maximum number of templates. Delete one first.",
+    }[result.status];
+    push({ kind: "note", text: message });
+  }, [templates, templateStore, input, push]);
+
+  const deleteTemplate = useCallback(
+    (id: string) => {
+      const next = removeTemplate(templates, id);
+      setTemplates(next);
+      templateStore.save(next);
+    },
+    [templates, templateStore],
+  );
+
+  const importFile = useCallback(
+    async (file: File) => {
+      if (running || pending.length > 0) return;
+      if (!isExcelHost()) {
+        push({ kind: "error", text: "Not running inside Excel. Open this pane from the Excel ribbon." });
+        return;
+      }
+      if (file.size > MAX_IMPORT_BYTES) {
+        push({ kind: "error", text: `That file is too large to import (over ${MAX_IMPORT_BYTES / 1_000_000} MB).` });
+        return;
+      }
+      setRunning(true);
+      setStatus(`Importing ${file.name}...`);
+      undo.beginGroup(`import ${file.name}`.slice(0, 60));
+      try {
+        const table = parseDelimited(await file.text());
+        if (table.rows.length === 0) throw new Error("The file has no rows to import.");
+        const out = await importTable(table.rows, file.name, undo);
+        const clipped = table.truncated ? " Rows or columns beyond the limits were left out." : "";
+        push({ kind: "action", ok: true, text: `✓ Imported ${out.rows} rows × ${out.columns} columns into a new sheet "${out.sheet}".${clipped}` });
+        setChangeLog(
+          addEntry(changeLogRef.current, {
+            command: `Import ${file.name}`,
+            steps: [`Imported ${out.rows} rows into new sheet "${out.sheet}" (headers in row 1)`],
+          }),
+        );
+      } catch (err) {
+        push({ kind: "error", text: friendlyError(err) });
+      } finally {
+        setRunning(false);
+        setCanUndo(undo.canUndo());
+      }
+    },
+    [running, pending.length, push, undo, setChangeLog],
   );
 
   const applyChanges = useCallback(async () => {
@@ -271,6 +339,21 @@ ${formatReadLog(reads)}`,
                 {ex}
               </Button>
             ))}
+            {templates.length > 0 && (
+              <>
+                <Text size={200} style={{ marginTop: 4 }}>Your templates:</Text>
+                {templates.map((t) => (
+                  <div key={t.id} style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <Button size="small" appearance="outline" title={t.prompt} style={{ flex: 1, minWidth: 0, justifyContent: "flex-start", textAlign: "left", height: "auto", padding: "4px 8px" }} onClick={() => setInput(t.prompt)}>
+                      {t.name}
+                    </Button>
+                    <Button size="small" appearance="subtle" aria-label={`Delete template ${t.name}`} title="Delete template" onClick={() => deleteTemplate(t.id)}>
+                      ✕
+                    </Button>
+                  </div>
+                ))}
+              </>
+            )}
             <Text size={200} style={{ marginTop: 4 }}>Or check your sheet without changing it:</Text>
             {REVIEW_SUGGESTIONS.map((ex) => (
               <Button key={ex} size="small" appearance="subtle" style={{ justifyContent: "flex-start", textAlign: "left", height: "auto", padding: "4px 8px" }} onClick={() => setInput(ex)}>
@@ -361,6 +444,23 @@ ${formatReadLog(reads)}`,
         <Button size="small" onClick={() => void send(lastCommandRef.current)} disabled={running || pending.length > 0 || !lastCommandRef.current}>
           Retry last
         </Button>
+        <Button size="small" onClick={saveTemplate} disabled={running || pending.length > 0 || (!input.trim() && !lastCommandRef.current)}>
+          Save template
+        </Button>
+        <Button size="small" onClick={() => importRef.current?.click()} disabled={running || pending.length > 0}>
+          Import CSV
+        </Button>
+        <input
+          ref={importRef}
+          type="file"
+          accept=".csv,.tsv,.txt,text/csv,text/plain"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void importFile(file);
+          }}
+        />
         <Button size="small" appearance="subtle" onClick={() => { setLines([]); setPending([]); setCanContinue(false); historyRef.current = []; setContextTokens(FIXED_TOKENS); changeLogRef.current = []; changeStore.clear(workbookKey); }} disabled={running}>
           Clear chat
         </Button>
