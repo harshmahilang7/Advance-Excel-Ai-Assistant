@@ -7,6 +7,8 @@ import { auditFormulas, MAX_FINDINGS_PER_KIND } from "./formulaAudit";
 import { canSnapshotFormats, FORMAT_PROPS_REQUEST, toRestoreProps, type CellFormat } from "./formatSnapshot";
 import { readSheetOverviewIn } from "./readSheets";
 import { cleanNote, localCell } from "./sourceNote";
+import { formatPlan } from "../agent/plan";
+import { describeVerification, verifyWrite } from "./writeVerify";
 import { resolvePivotFields, type PivotAggregation } from "./pivotFields";
 import { preparePivotSource } from "./pivotSource";
 import type { UndoLog } from "./undo";
@@ -50,6 +52,21 @@ const snapshotFormulas = async (ctx: Ctx, range: Excel.Range, undo: UndoLog): Pr
     }),
   );
   return fullAddress;
+};
+
+/**
+ * Read the written cells back and report cells Excel stored differently or that show errors.
+ * Never fails the write: any problem reading back just returns "".
+ */
+const verifyWritten = async (ctx: Ctx, target: Excel.Range, wrote: readonly (readonly unknown[])[]): Promise<string> => {
+  try {
+    target.load(["formulas", "values", "rowIndex", "columnIndex"]);
+    await ctx.sync();
+    const result = verifyWrite(wrote, target.formulas, target.values, { row: target.rowIndex, col: target.columnIndex });
+    return describeVerification(result);
+  } catch {
+    return "";
+  }
 };
 
 const NOTES_API = "1.18";
@@ -137,6 +154,10 @@ const NOT_UNDOABLE = " (formatting too large to undo)";
 type Handlers ={ [N in ToolName]: (ctx: Ctx, args: ToolArgs<N>, undo: UndoLog) => Promise<ToolResult> };
 
 const handlers: Handlers = {
+  async propose_plan(_ctx, { steps }) {
+    return ok(formatPlan(steps));
+  },
+
   async get_workbook_info(ctx) {
     const { sheets, omittedSheets } = await readSheetOverviewIn(ctx);
     const more = omittedSheets > 0 ? `, ${omittedSheets} more not listed` : "";
@@ -176,8 +197,9 @@ const handlers: Handlers = {
     const where = await snapshotFormulas(ctx, target, undo);
     target.formulas = data.map((row) => row.map((c) => c ?? ""));
     await ctx.sync();
+    const verified = await verifyWritten(ctx, target, data);
     const noteStatus = await attachSourceNote(ctx, target, note, undo);
-    return ok(`Wrote ${rows}x${cols} cells at ${where}${noteStatus}`);
+    return ok(`Wrote ${rows}x${cols} cells at ${where}${verified}${noteStatus}`);
   },
 
   async format_range(ctx, a, undo) {

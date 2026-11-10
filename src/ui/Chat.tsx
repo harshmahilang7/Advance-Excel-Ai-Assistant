@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Spinner, Switch, Text, Textarea } from "@fluentui/react-components";
 import { addEntry, dropLastMatching, formatChangeLog, type ChangeEntry } from "../agent/changeLog";
 import { applyPending, createPreviewExecutor, isReadOnlyTool, type PendingCall } from "../agent/preview";
+import { isPlanTool } from "../agent/plan";
 import { addRead, describeRead, formatReadLog } from "../agent/readLog";
 import { browserChangeLogStore } from "../lib/changeLogStore";
 import { createGeminiClient } from "../agent/geminiClient";
@@ -125,6 +126,7 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
   const onEvent = useCallback(
     (e: AgentEvent) => {
       if (e.type === "text") push({ kind: "assistant", text: e.text });
+      else if (isPlanTool(e.name) && e.ok) push({ kind: "note", text: e.summary });
       else {
         push({ kind: "action", ok: e.ok, text: `${e.ok ? "✓" : "⚠"} ${e.summary}` });
         setStatus(`${WAITING} Last step: ${e.summary}`);

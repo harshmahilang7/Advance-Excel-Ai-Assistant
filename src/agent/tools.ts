@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAX_NOTE_CHARS } from "../excel/sourceNote";
+import { MAX_PLAN_STEPS, MAX_STEP_CHARS } from "./plan";
 import { CLEAN_OPERATIONS } from "../excel/cleaning";
 
 /** A1-style address, optionally sheet-qualified: A1, $A$1:B9, A:A, Sheet1!A1, 'My Sheet'!A1:C3 */
@@ -67,6 +68,9 @@ const VALIDATION_OPERATORS = [
 
 const schemas = {
   get_workbook_info: z.object({}),
+  propose_plan: z.object({
+    steps: z.array(z.string().trim().min(1).max(MAX_STEP_CHARS)).min(2).max(MAX_PLAN_STEPS),
+  }),
   read_range: z.object({
     address,
     maxRows: z.number().int().min(1).max(500).optional(),
@@ -233,6 +237,8 @@ export const parseToolCall = (name: string, args: unknown): ParseResult => {
 };
 
 const descriptions: Record<ToolName, string> = {
+  propose_plan:
+    "Show the user a short numbered plan before you start. Call it first, once, only when the request needs three or more separate changes (for example add a column, format it, then chart it). Each step is one short sentence. It changes nothing; carry on with the other tools right after.",
   get_workbook_info: "List all worksheets with their used range addresses and header row (up to 20 sheets). Call this first if you do not know the layout.",
   read_range:
     "Read cell values and formulas from a range. Use to inspect data before changing it. Returns up to maxRows rows (default 100). Rows hidden by a filter are skipped; the result reports how many.",
