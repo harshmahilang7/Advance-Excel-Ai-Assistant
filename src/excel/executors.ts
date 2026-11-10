@@ -16,6 +16,16 @@ import {
   type CellFormat,
 } from "./formatSnapshot";
 import { readSheetOverviewIn } from "./readSheets";
+import {
+  addressKind,
+  deleteShift,
+  hasAnyData,
+  insertShift,
+  MAX_DELETE_UNDO_CELLS,
+  otherCellsHaveData,
+  undoDeleteShift,
+  undoInsertShift,
+} from "./structure";
 import { cleanNote, localCell } from "./sourceNote";
 import { formatPlan } from "../agent/plan";
 import { describeVerification, verifyWrite } from "./writeVerify";
@@ -607,6 +617,94 @@ const handlers: Handlers = {
     }
     await ctx.sync();
     return ok(`Set ${a.rule} validation on ${fullAddress}${note}`);
+  },
+
+  async insert_range(ctx, { address, shift }, undo) {
+    const range = resolveRange(ctx, address);
+    range.load("address");
+    await ctx.sync();
+    const fullAddress = range.address;
+    const direction = insertShift(addressKind(address), shift);
+    range.insert(direction);
+    await ctx.sync();
+    const reverse = undoInsertShift(direction);
+    undo.record(`remove inserted ${fullAddress}`, () =>
+      Excel.run(async (c) => {
+        resolveRange(c, fullAddress).delete(reverse);
+        await c.sync();
+      }),
+    );
+    return ok(`Inserted blank cells at ${fullAddress}, shifting existing content ${direction.toLowerCase()}`);
+  },
+
+  async delete_range(ctx, { address, shift }, undo) {
+    const range = resolveRange(ctx, address);
+    range.load("address");
+    const used = range.worksheet.getUsedRangeOrNullObject(true).getIntersectionOrNullObject(range);
+    used.load(["rowCount", "columnCount"]);
+    await ctx.sync();
+    const fullAddress = range.address;
+    const direction = deleteShift(addressKind(address), shift);
+    if (!used.isNullObject) {
+      if (used.rowCount * used.columnCount > MAX_DELETE_UNDO_CELLS) {
+        return { ok: false, error: formatToolError("RANGE_TOO_LARGE", `${fullAddress} holds more than ${MAX_DELETE_UNDO_CELLS} used cells, too many to restore on undo.`, "delete smaller pieces, or ask the user to do it by hand.") };
+      }
+      await snapshotFormulas(ctx, used, undo);
+      await snapshotFormats(ctx, used, undo);
+    }
+    range.delete(direction);
+    await ctx.sync();
+    const back = undoDeleteShift(direction);
+    // Recorded last so undo runs it first: the space returns, then the saved contents are written back.
+    undo.record(`re-insert ${fullAddress}`, () =>
+      Excel.run(async (c) => {
+        resolveRange(c, fullAddress).insert(back);
+        await c.sync();
+      }),
+    );
+    return ok(`Deleted ${fullAddress}, shifting remaining content ${direction.toLowerCase()}. Formulas elsewhere that used it may now show #REF! (undo does not repair those)`);
+  },
+
+  async copy_range(ctx, { sourceAddress, destinationAddress, what, overwrite }, undo) {
+    const src = resolveRange(ctx, sourceAddress);
+    src.load(["address", "rowCount", "columnCount"]);
+    await ctx.sync();
+    if (src.rowCount * src.columnCount > MAX_DELETE_UNDO_CELLS) {
+      return { ok: false, error: formatToolError("RANGE_TOO_LARGE", `${src.address} is too large to copy with undo.`, "copy a smaller range.") };
+    }
+    const dest = resolveRange(ctx, destinationAddress).getCell(0, 0).getResizedRange(src.rowCount - 1, src.columnCount - 1);
+    dest.load(["address", "values"]);
+    await ctx.sync();
+    if (what !== "formats" && !overwrite && hasAnyData(dest.values)) {
+      return { ok: false, error: formatToolError("DESTINATION_OCCUPIED", `${dest.address} already contains data.`, "pick an empty destination, or set overwrite true if the user asked to replace it.") };
+    }
+    let undoable = true;
+    if (what !== "formats") await snapshotFormulas(ctx, dest, undo);
+    if (what !== "values") undoable = await snapshotFormats(ctx, dest, undo);
+    const copyType = { all: Excel.RangeCopyType.all, values: Excel.RangeCopyType.values, formats: Excel.RangeCopyType.formats }[what];
+    dest.copyFrom(src, copyType);
+    await ctx.sync();
+    return ok(`Copied ${what} of ${src.address} to ${dest.address}${undoable ? "" : NOT_UNDOABLE}`);
+  },
+
+  async merge_cells(ctx, { address, across, discardOthers }, undo) {
+    const range = resolveRange(ctx, address);
+    range.load(["address", "values"]);
+    await ctx.sync();
+    const loses = across ? range.values.some((row) => otherCellsHaveData([row])) : otherCellsHaveData(range.values);
+    if (loses && !discardOthers) {
+      return { ok: false, error: formatToolError("DATA_WOULD_BE_LOST", `Merging ${range.address} would discard values in all but the top-left cell.`, "move or combine the data first, or set discardOthers true if the user accepts losing it.") };
+    }
+    const where = await snapshotFormulas(ctx, range, undo);
+    range.merge(across);
+    await ctx.sync();
+    undo.record(`unmerge ${where}`, () =>
+      Excel.run(async (c) => {
+        resolveRange(c, where).unmerge();
+        await c.sync();
+      }),
+    );
+    return ok(`Merged ${where}${across ? " row by row" : ""}${loses ? " (other values discarded)" : ""}`);
   },
 
   async remove_duplicates(ctx, { address, columnIndexes, hasHeaders }, undo) {

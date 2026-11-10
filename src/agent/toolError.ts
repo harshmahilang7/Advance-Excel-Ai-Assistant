@@ -12,6 +12,7 @@ export type ToolErrorCode =
   | "SOURCE_EMPTY"
   | "RANGE_TOO_LARGE"
   | "COLUMN_OUT_OF_RANGE"
+  | "DATA_WOULD_BE_LOST"
   | "PIVOT_SOURCE_INVALID";
 
 const CODE_PATTERN = /^([A-Z][A-Z0-9_]{2,}):\s/;

@@ -56,3 +56,11 @@ Put this in Sheet1 first: headers `Region, Product, Qty, Price` and 5 rows of da
 
 - [ ] No console errors in the pane (right-click → Inspect, if available).
 - [ ] Note anything that looked wrong, even if it did not fail. UI glitches are the likeliest bugs.
+
+## Structure edits
+
+- [ ] "Insert a column before Qty": a blank column appears and formulas still work. **Undo last** removes it.
+- [ ] "Delete row 3", then **Undo last**: the row returns with its values and formatting.
+- [ ] "Copy A1:D6 to F1": copied. Repeat it: refused with `DESTINATION_OCCUPIED`.
+- [ ] "Merge A1:D1" when B1:D1 hold data: refused with `DATA_WOULD_BE_LOST`.
+- [ ] Open the pane with the browser console visible: no blocking errors; any `Content-Security-Policy-Report-Only` messages are noted (they block nothing).

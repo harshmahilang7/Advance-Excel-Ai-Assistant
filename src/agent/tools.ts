@@ -6,7 +6,7 @@ import { CLEAN_OPERATIONS } from "../excel/cleaning";
 
 /** A1-style address, optionally sheet-qualified: A1, $A$1:B9, A:A, Sheet1!A1, 'My Sheet'!A1:C3 */
 const ADDRESS_PATTERN =
-  /^(?:(?:'[^']{1,120}'|[A-Za-z0-9_.]{1,120})!)?\$?[A-Za-z]{1,3}\$?\d{0,7}(?::\$?[A-Za-z]{1,3}\$?\d{0,7})?$/;
+  /^(?:(?:'[^']{1,120}'|[A-Za-z0-9_.]{1,120})!)?(?:\$?[A-Za-z]{1,3}\$?\d{0,7}(?::\$?[A-Za-z]{1,3}\$?\d{0,7})?|\$?\d{1,7}:\$?\d{1,7})$/;
 
 const address = z.string().regex(ADDRESS_PATTERN, "Invalid address. Use A1 notation like A1, B2:D9 or Sheet1!A1:C5.");
 
@@ -139,6 +139,25 @@ const schemas = {
         else if ((a.operator === "Between" || a.operator === "NotBetween") && a.value2 === undefined) fail(`${a.operator} needs value2.`);
       }
     }),
+  insert_range: z.object({
+    address,
+    shift: z.enum(["Down", "Right"]).optional(),
+  }),
+  delete_range: z.object({
+    address,
+    shift: z.enum(["Up", "Left"]).optional(),
+  }),
+  copy_range: z.object({
+    sourceAddress: address,
+    destinationAddress: address,
+    what: z.enum(["all", "values", "formats"]).default("all"),
+    overwrite: z.boolean().default(false),
+  }),
+  merge_cells: z.object({
+    address,
+    across: z.boolean().default(false),
+    discardOthers: z.boolean().default(false),
+  }),
   remove_duplicates: z.object({
     address,
     columnIndexes: z.array(z.number().int().min(0).max(200)).min(1).max(200),
@@ -265,6 +284,14 @@ const descriptions: Record<ToolName, string> = {
     "Freeze the top `rows` rows and/or the first `columns` columns of the active sheet so they stay visible while scrolling. rows=0 and columns=0 removes any freeze.",
   data_validation:
     "Restrict what can be typed into a range. rule 'list': dropdown from listValues (no commas inside items). rule 'wholeNumber' | 'decimal' | 'textLength': needs operator (Between, NotBetween, EqualTo, NotEqualTo, GreaterThan, LessThan, GreaterThanOrEqualTo, LessThanOrEqualTo) and value1 (value2 for Between/NotBetween). rule 'clear' removes validation. errorMessage is shown on bad input.",
+  insert_range:
+    "Insert blank rows, columns or cells, pushing existing content aside. Whole rows like '3:5' insert above row 3; whole columns like 'C:C' insert left of C; a cell range like 'B2:D4' needs shift (Down or Right, default Down). Formulas elsewhere adjust automatically. Undoable.",
+  delete_range:
+    "Delete whole rows ('3:5'), whole columns ('C:D') or cells ('B2:D4' with shift Up or Left, default Up), closing the gap. Destructive: formulas pointing at deleted cells show #REF!. Undo restores the contents and formats but not formulas elsewhere that broke. Refused for very large used areas.",
+  copy_range:
+    "Copy a source range to a destination (top-left cell is enough), what: 'all' (default), 'values' or 'formats'. Relative formulas adjust. Refuses a destination that already holds data unless overwrite is true. Undoable. Use write_cells for new data and this for duplicating existing blocks.",
+  merge_cells:
+    "Merge a range into one cell (across true merges each row separately). Keeps only the top-left value, so it refuses when other cells hold data unless discardOthers is true. Use sparingly: merged cells break sorting and filtering. Undoable.",
   remove_duplicates:
     "Delete duplicate rows in a range, comparing the columns in columnIndexes (0-based within the range). The first occurrence is kept. Set hasHeaders true if the first row is a header. Destructive but undoable.",
   filter_range:

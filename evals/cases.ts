@@ -174,6 +174,39 @@ export const CASES: readonly EvalCase[] = [
     example: [{ name: "data_validation", args: { address: "A2:A6", rule: "list", listValues: ["East", "West", "North"] } }],
   },
   {
+    id: "insert-column",
+    prompt: "Insert a new empty column before the Qty column",
+    sheet: SALES,
+    mustCall: ["insert_range"],
+    mustNotCall: ["write_cells"],
+    check: (calls) =>
+      someCall(calls, "insert_range", (a) => /^(?:.*!)?\$?[A-Z]+:\$?[A-Z]+$/i.test(text(a.address).replaceAll("$", "")))
+        ? null
+        : "expected a whole-column address like C:C",
+    example: [{ name: "insert_range", args: { address: "C:C" } }],
+  },
+  {
+    id: "delete-row",
+    prompt: "Delete row 3",
+    sheet: SALES,
+    mustCall: ["delete_range"],
+    mustNotCall: ["clear_range"],
+    check: (calls) =>
+      someCall(calls, "delete_range", (a) => strippedAddress(a.address) === "3:3") ? null : "expected delete_range on row 3 (3:3)",
+    example: [{ name: "delete_range", args: { address: "3:3" } }],
+  },
+  {
+    id: "copy-block",
+    prompt: "Copy A1:D6 to F1 on the same sheet",
+    sheet: SALES,
+    mustCall: ["copy_range"],
+    check: (calls) =>
+      someCall(calls, "copy_range", (a) => strippedAddress(a.sourceAddress) === "A1:D6" && strippedAddress(a.destinationAddress).startsWith("F1"))
+        ? null
+        : "expected copy_range from A1:D6 to F1",
+    example: [{ name: "copy_range", args: { sourceAddress: "A1:D6", destinationAddress: "F1" } }],
+  },
+  {
     id: "dedupe-product",
     prompt: "Remove duplicate rows based on the Product column",
     sheet: SALES,
