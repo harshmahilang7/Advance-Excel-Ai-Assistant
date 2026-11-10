@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Spinner, Switch, Text, Textarea } from "@fluentui/react-components";
 import { addEntry, dropLastMatching, formatChangeLog, type ChangeEntry } from "../agent/changeLog";
 import { applyPending, createPreviewExecutor, isReadOnlyTool, type PendingCall } from "../agent/preview";
+import { addRead, describeRead, formatReadLog } from "../agent/readLog";
 import { browserChangeLogStore } from "../lib/changeLogStore";
 import { createGeminiClient } from "../agent/geminiClient";
 import { trimHistory } from "../agent/history";
@@ -159,8 +160,13 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
       abortRef.current = controller;
       let queued: readonly PendingCall[] = [];
       let steps: readonly string[] = [];
+      let reads: readonly string[] = [];
       const collect = (e: AgentEvent) => {
         onEvent(e);
+        if (e.type === "tool" && e.ok) {
+          const read = describeRead(e.name, e.args);
+          if (read) reads = addRead(reads, read);
+        }
         // Only real, successful writes count. In preview mode nothing ran, so nothing is recorded here.
         if (!previewMode && e.type === "tool" && e.ok && !isReadOnlyTool(e.name)) steps = [...steps, e.summary];
       };
@@ -184,6 +190,7 @@ export const Chat = ({ apiKeys, modelId }: Props) => {
           onStream,
         });
         historyRef.current = trimHistory(result.history, KEEP_USER_TURNS);
+        push({ kind: "note", text: formatReadLog(reads) });
         if (result.aborted) push({ kind: "note", text: "Stopped." });
         else if (result.hitStepLimit) push({ kind: "note", text: "Stopped after the step limit. Ask me to continue if needed." });
       } catch (err) {
