@@ -6,6 +6,7 @@ import { toRuleFormula } from "./conditionalFormat";
 import { auditFormulas, MAX_FINDINGS_PER_KIND } from "./formulaAudit";
 import { canSnapshotFormats, FORMAT_PROPS_REQUEST, toRestoreProps, type CellFormat } from "./formatSnapshot";
 import { readSheetOverviewIn } from "./readSheets";
+import { cleanNote, localCell } from "./sourceNote";
 import { resolvePivotFields, type PivotAggregation } from "./pivotFields";
 import { preparePivotSource } from "./pivotSource";
 import type { UndoLog } from "./undo";
@@ -49,6 +50,60 @@ const snapshotFormulas = async (ctx: Ctx, range: Excel.Range, undo: UndoLog): Pr
     }),
   );
   return fullAddress;
+};
+
+const NOTES_API = "1.18";
+
+/**
+ * Save the model's explanation as a cell note on the top-left cell of a write. Never fails the write:
+ * returns a short suffix for the step line ("" when no note was asked for).
+ */
+const attachSourceNote = async (ctx: Ctx, target: Excel.Range, raw: string | undefined, undo: UndoLog): Promise<string> => {
+  const text = cleanNote(raw);
+  if (!text) return "";
+  if (!Office.context.requirements.isSetSupported("ExcelApi", NOTES_API)) {
+    return ` (note skipped: cell notes need Excel API ${NOTES_API})`;
+  }
+  try {
+    const first = target.getCell(0, 0);
+    first.load("address");
+    await ctx.sync();
+    const fullAddress = first.address;
+    const cell = localCell(fullAddress);
+    if (!cell) return " (note skipped: no single cell to attach to)";
+    const sheetNotes = first.worksheet.notes;
+    const existing = sheetNotes.getItemOrNullObject(cell);
+    existing.load(["isNullObject", "content"]);
+    await ctx.sync();
+    if (existing.isNullObject) {
+      sheetNotes.add(cell, text);
+      undo.record(`remove note ${fullAddress}`, () =>
+        Excel.run(async (c) => {
+          const found = resolveRange(c, fullAddress).worksheet.notes.getItemOrNullObject(cell);
+          found.load("isNullObject");
+          await c.sync();
+          if (!found.isNullObject) found.delete();
+          await c.sync();
+        }),
+      );
+    } else {
+      const previous = existing.content;
+      existing.content = text;
+      undo.record(`restore note ${fullAddress}`, () =>
+        Excel.run(async (c) => {
+          const found = resolveRange(c, fullAddress).worksheet.notes.getItemOrNullObject(cell);
+          found.load("isNullObject");
+          await c.sync();
+          if (!found.isNullObject) found.content = previous;
+          await c.sync();
+        }),
+      );
+    }
+    await ctx.sync();
+    return ` (note added on ${cell})`;
+  } catch {
+    return " (note could not be added)";
+  }
 };
 
 /**
@@ -114,14 +169,15 @@ const handlers: Handlers = {
     });
   },
 
-  async write_cells(ctx, { address, data }, undo) {
+  async write_cells(ctx, { address, data, note }, undo) {
     const rows = data.length;
     const cols = data[0]?.length ?? 1;
     const target = resolveRange(ctx, address).getCell(0, 0).getResizedRange(rows - 1, cols - 1);
     const where = await snapshotFormulas(ctx, target, undo);
     target.formulas = data.map((row) => row.map((c) => c ?? ""));
     await ctx.sync();
-    return ok(`Wrote ${rows}x${cols} cells at ${where}`);
+    const noteStatus = await attachSourceNote(ctx, target, note, undo);
+    return ok(`Wrote ${rows}x${cols} cells at ${where}${noteStatus}`);
   },
 
   async format_range(ctx, a, undo) {
