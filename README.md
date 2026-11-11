@@ -1,8 +1,7 @@
 # Excel-Ai-Assistant
 
-[![CI](https://github.com/ifahimkhan/Excel-Ai-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/ifahimkhan/Excel-Ai-Assistant/actions/workflows/ci.yml)
 
-An open-source AI assistant that lives inside Excel. Type what you want in plain English and it edits your workbook: formulas, formatting, sorting, tables, charts and PivotTables.
+An   AI assistant that lives inside Excel. Type what you want in plain English and it edits your workbook: formulas, formatting, sorting, tables, charts and PivotTables.
 
 You bring your own [Gemini API key](https://aistudio.google.com/apikey) (or several: when one hits a quota limit, the next is used). There is no backend and no account.
 
